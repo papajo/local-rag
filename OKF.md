@@ -26,7 +26,7 @@ The system runs locally and uses the following model pipeline:
 2. **Reranking**: `cross-encoder/ms-marco-MiniLM-L-6-v2` or `BAAI/bge-reranker-v2-m3` for precision sorting.
 3. **Entity Extraction / Topic Classification**: `urchade/gliner_multi-v2.1` via MessagePack endpoints.
 4. **Lightweight Ingest (Spotlight)**: `sentence-transformers/all-MiniLM-L6-v2` (384-dim dense vectors) for low-overhead filesystem search.
-5. **Generation / Chat**: `Qwen/Qwen3-0.6B` (quantized to 4-bit via MLX community weight mapping) for lightweight local LLM tasks on macOS (uses ~800MB - 1.2GB RAM).
+5. **Generation / Chat**: `prism-ml/Bonsai-27B-mlx-1bit` (1-bit quantized MLX version based on Qwen3.6-27B) for high-performance 27B-class reasoning on macOS (uses ~3.9GB RAM).
 
 ---
 
@@ -50,8 +50,9 @@ Under the OpenSpec change proposal `fix-config-and-port-defaults`, we implemente
 
 ## 3. Local Model Customizations (Apple Silicon MLX)
 
-To support ultra-lightweight generation on Mac machines with 16GB RAM:
-1. **Model Configuration**: We edited the `Qwen__Qwen3-0.6B.yaml` specification file in the `sie-server` packages path.
-2. **MLX Integration**: Added `mlx_repo: mlx-community/Qwen3-0.6B-4bit` to leverage Apple MLX 4-bit quantized inference natively on macOS MPS backend.
+To support ultra-lightweight high-performance generation on Mac machines with 16GB RAM:
+1. **Model Configuration**: We created the `prism-ml__Bonsai-27B-mlx-1bit.yaml` model definition file in the `sie-server` packages path.
+2. **MLX Integration**: Configured `mlx_repo: prism-ml/Bonsai-27B-mlx-1bit` to leverage Apple MLX 1-bit quantized inference natively on macOS MPS backend (memory footprint ~3.9 GB RAM).
 3. **Reasoning Settings**: Added `enable_thinking: false` under `chat_template_kwargs` and registered `reasoning_parser: qwen3`.
-4. **Usage Guideline**: Because Qwen3 models are reasoning-centric, they emit a verbose internal thought process before outputting answers. Queries must be run with a token limit of at least **512 tokens** (preferably `1024`) to give the model enough headroom to complete its thoughts and populate the final response body.
+4. **Usage Guideline**: Because Bonsai-27B (derived from Qwen3.6-27B) is a reasoning-centric model, it writes out a thought process before outputting answers. Queries must be run with a token limit of at least **512 tokens** (preferably `1024`) to give the model enough headroom to complete its thoughts and populate the final response body.
+
