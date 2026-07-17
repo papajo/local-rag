@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="flex items-center justify-between mb-6">
+  <h2 class="text-xl font-bold text-teal-400">📋 Daily Digest</h2>
+  <div class="flex gap-2 text-sm">
+    <a href="/digest" class="text-teal-400 hover:text-teal-300">← All Items</a>
+  </div>
+</div>
+
+<div class="prose prose-invert prose-teal max-w-none">
+  {% for line in digest_content.split('\n') %}
+    {% if line.startswith('# ') %}
+      <h1 class="text-2xl font-bold text-teal-400 mt-6 mb-2">{{ line[2:] }}</h1>
+    {% elif line.startswith('## ') %}
+      <h2 class="text-xl font-semibold text-gray-200 mt-5 mb-2 border-b border-gray-800 pb-1">{{ line[3:] }}</h2>
+    {% elif line.startswith('### ') %}
+      <h3 class="text-lg font-medium text-gray-300 mt-4 mb-1">{{ line[4:] }}</h3>
+    {% elif line.startswith('*') and line.endswith('*') and not line.startswith('**') %}
+      <p class="text-xs text-gray-500 italic">{{ line[1:-1] }}</p>
+    {% elif line.startswith('🔗 ') %}
+      <p class="text-sm">{{ line }}</p>
+    {% elif line.startswith('🏷️ ') %}
+      <p class="text-xs text-gray-400">{{ line }}</p>
+    {% elif line.strip() == '' %}
+      <div class="h-2"></div>
+    {% else %}
+      <p class="text-sm text-gray-300">{{ line }}</p>
+    {% endif %}
+  {% endfor %}
+</div>
+
+{% endblock %}

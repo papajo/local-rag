@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2 class="text-2xl font-bold mb-4">Search Documents</h2>
+
+<form method="POST" action="/" class="flex gap-2 mb-6">
+  <input type="text" name="q" value="{{ query_text }}"
+         placeholder="Ask anything about your documents..."
+         class="flex-1 px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+         autofocus>
+  <input type="number" name="top_k" value="{{ top_k|default(5) }}" min="1" max="50"
+         class="w-20 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 text-center focus:outline-none focus:ring-2 focus:ring-teal-500">
+  <button type="submit"
+          class="px-5 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg font-medium transition-colors">
+    Search
+  </button>
+</form>
+
+{% if error %}
+<div class="bg-red-900/50 border border-red-700 text-red-200 px-4 py-3 rounded-lg mb-4">
+  {{ error }}
+</div>
+{% endif %}
+
+{% if results is none %}
+<div class="text-center py-16 text-gray-500">
+  <p class="text-5xl mb-4">🔍</p>
+  <p>Enter a query above to search your indexed documents.</p>
+</div>
+{% elif results|length == 0 %}
+<div class="text-center py-16 text-gray-500">
+  <p class="text-5xl mb-4">🔍</p>
+  <p>No results found.</p>
+  <p class="mt-2 text-sm">Try a different query or <a href="/status" class="text-teal-400 hover:underline">index more documents</a>.</p>
+</div>
+{% else %}
+<div class="space-y-3">
+  {% for r in results %}
+  <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 hover:border-gray-700 transition-colors">
+    <div class="flex items-center justify-between mb-1">
+      <span class="text-xs text-gray-500 font-mono">{{ r.source }} <span class="text-gray-600">chunk {{ r.chunk_index }}</span></span>
+      <span class="text-xs font-mono
+        {% if r.rerank_score > 0 %}text-teal-400{% else %}text-gray-500{% endif %}">
+        {% if r.rerank_score > 0 %}{{ "%.2f"|format(r.rerank_score) }}{% else %}{{ "%.4f"|format(r.vector_score) }}{% endif %}
+      </span>
+    </div>
+    <p class="text-sm text-gray-300 leading-relaxed">{{ r.text[:300] }}{% if r.text|length > 300 %}…{% endif %}</p>
+    {% if r.entities %}
+    <div class="mt-2 flex flex-wrap gap-1">
+      {% for e in r.entities %}
+      <span class="entity-tag" title="{{ e.label }}">{{ e.text }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% endblock %}

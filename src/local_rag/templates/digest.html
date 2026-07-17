@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="flex items-center justify-between mb-6">
+  <h2 class="text-xl font-bold text-teal-400">📋 Digest</h2>
+  <span class="text-sm text-gray-500">{{ digest_count }} items</span>
+</div>
+
+{% if error %}
+<div class="bg-red-900/40 border border-red-700 text-red-200 px-4 py-3 rounded mb-4 text-sm">{{ error }}</div>
+{% endif %}
+
+<!-- Add item form -->
+<div class="bg-gray-900 rounded-lg border border-gray-800 p-4 mb-6">
+  <h3 class="text-sm font-semibold text-gray-300 mb-3">Add Item</h3>
+  <form action="/digest" method="post" class="space-y-3">
+    <textarea name="text" rows="4" required
+              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-teal-500"
+              placeholder="Paste article text or newsletter content..."></textarea>
+    <div class="flex gap-3 flex-wrap">
+      <select name="source_type"
+              class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-teal-500">
+        <option value="article">Article</option>
+        <option value="newsletter">Newsletter</option>
+        <option value="paper">Paper</option>
+        <option value="manual">Manual</option>
+      </select>
+      <input name="source" placeholder="Source name (e.g. TLDR AI)"
+             class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-teal-500 flex-1 min-w-[160px]">
+      <input name="url" placeholder="URL (optional)"
+             class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-teal-500 flex-1 min-w-[160px]">
+      <input name="tags" placeholder="Tags (comma-sep)"
+             class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-teal-500 flex-1 min-w-[120px]">
+      <button type="submit"
+              class="bg-teal-600 hover:bg-teal-500 text-white px-4 py-2 rounded text-sm font-medium transition-colors">
+        Add
+      </button>
+    </div>
+  </form>
+</div>
+
+<!-- Filters -->
+<form method="get" action="/digest" class="flex gap-3 flex-wrap items-center mb-4">
+  <label class="text-xs text-gray-400">Days:</label>
+  <select name="days" onchange="this.form.submit()"
+          class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200">
+    <option value="1" {% if days == 1 %}selected{% endif %}>1</option>
+    <option value="7" {% if days == 7 %}selected{% endif %}>7</option>
+    <option value="14" {% if days == 14 %}selected{% endif %}>14</option>
+    <option value="30" {% if days == 30 %}selected{% endif %}>30</option>
+  </select>
+
+  {% if all_topics %}
+  <label class="text-xs text-gray-400">Topic:</label>
+  <select name="topic" onchange="this.form.submit()"
+          class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200">
+    <option value="">All</option>
+    {% for t in all_topics %}
+    <option value="{{ t }}" {% if active_topic == t %}selected{% endif %}>{{ t }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+
+  <label class="text-xs text-gray-400">Importance:</label>
+  <select name="importance" onchange="this.form.submit()"
+          class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200">
+    <option value="">All</option>
+    <option value="high" {% if active_importance == 'high' %}selected{% endif %}>High</option>
+    <option value="medium" {% if active_importance == 'medium' %}selected{% endif %}>Medium</option>
+    <option value="low" {% if active_importance == 'low' %}selected{% endif %}>Low</option>
+  </select>
+
+  <a href="/digest/daily" class="text-xs text-teal-400 hover:text-teal-300 ml-auto">View Daily Digest →</a>
+</form>
+
+<!-- Items list -->
+{% if items %}
+<div class="space-y-3">
+  {% for item in items %}
+  <div class="bg-gray-900 rounded-lg border border-gray-800 p-4">
+    <div class="flex items-start justify-between mb-1">
+      <div>
+        <span class="text-xs text-gray-500">{{ item.timestamp[:10] }}</span>
+        <span class="text-sm font-medium text-gray-200 ml-2">{{ item.source }}</span>
+        <span class="text-xs text-gray-500 ml-1">({{ item.source_type }})</span>
+      </div>
+      <div class="flex gap-1">
+        {% if item.importance == 'high' %}
+        <span class="text-xs bg-red-900/40 text-red-300 px-1.5 py-0.5 rounded">high</span>
+        {% elif item.importance == 'medium' %}
+        <span class="text-xs bg-yellow-900/40 text-yellow-300 px-1.5 py-0.5 rounded">medium</span>
+        {% else %}
+        <span class="text-xs bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded">low</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <p class="text-sm text-gray-300 mb-2">{{ item.summary }}</p>
+
+    {% if item.topics %}
+    <div class="flex gap-1 flex-wrap mb-1">
+      {% for topic in item.topics %}
+      <span class="text-xs bg-teal-900/30 text-teal-300 px-1.5 py-0.5 rounded">{{ topic }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if item.entities %}
+    <div class="text-xs text-gray-500">
+      {% for e in item.entities[:3] %}
+      <span class="entity-tag">{{ e.label }}: {{ e.text }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if item.url %}
+    <div class="mt-1">
+      <a href="{{ item.url }}" target="_blank" class="text-xs text-teal-500 hover:text-teal-400">🔗 {{ item.source }}</a>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-12 text-gray-500">
+  <p class="text-lg">No digest items yet.</p>
+  <p class="text-sm mt-1">Use the form above to add articles or newsletters.</p>
+</div>
+{% endif %}
+
+{% endblock %}

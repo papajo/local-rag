@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2 class="text-2xl font-bold mb-4">Personal Semantic Memory</h2>
+
+<!-- Add memory form -->
+<div class="bg-gray-900 border border-gray-800 rounded-lg p-4 mb-6">
+  <h3 class="text-sm font-medium text-gray-400 mb-3">Record a new memory</h3>
+  <form method="POST" action="/memories" class="flex gap-2">
+    <input type="text" name="text" placeholder="What do you want to remember?"
+           class="flex-1 px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm">
+    <input type="text" name="tags" placeholder="tags (comma-separated)"
+           class="w-44 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm">
+    <button type="submit"
+            class="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg font-medium transition-colors text-sm">
+      Save
+    </button>
+  </form>
+</div>
+
+<!-- Search / recent toggle -->
+<form method="GET" action="/memories" class="flex gap-2 mb-6">
+  <input type="text" name="q" value="{{ query_text }}"
+         placeholder="Search memories..."
+         class="flex-1 px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm">
+  <button type="submit"
+          class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg font-medium transition-colors text-sm">
+    Search
+  </button>
+  <a href="/memories?recent=1"
+     class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg font-medium transition-colors text-sm {% if recent %}ring-2 ring-teal-500{% endif %}">
+    Recent
+  </a>
+</form>
+
+{% if error %}
+<div class="bg-red-900/50 border border-red-700 text-red-200 px-4 py-3 rounded-lg mb-4">
+  {{ error }}
+</div>
+{% endif %}
+
+{% if entries|length == 0 %}
+<div class="text-center py-16 text-gray-500">
+  <p class="text-5xl mb-4">🧠</p>
+  <p>No memories yet.</p>
+  <p class="mt-2 text-sm">Use the form above to record your first memory.</p>
+</div>
+{% else %}
+<div class="space-y-3">
+  {% for m in entries %}
+  <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 hover:border-gray-700 transition-colors">
+    <div class="flex items-center justify-between mb-1">
+      <span class="text-xs text-gray-500">
+        <span class="font-mono">{{ m.timestamp[:19]|replace("T", " ") }}</span>
+        <span class="text-gray-600">·</span>
+        <span class="text-cyan-600">{{ m.source }}</span>
+      </span>
+    </div>
+    <p class="text-sm text-gray-300 leading-relaxed">{{ m.text[:300] }}{% if m.text|length > 300 %}…{% endif %}</p>
+    {% if m.entities %}
+    <div class="mt-2 flex flex-wrap gap-1">
+      {% for e in m.entities %}
+      <span class="entity-tag" title="{{ e.label }}">{{ e.text }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if m.tags %}
+    <div class="mt-1.5 flex flex-wrap gap-1">
+      {% for t in m.tags %}
+      <span class="inline-block text-xs px-1.5 py-0.5 rounded bg-gray-800 text-yellow-600">#{{ t }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% endblock %}

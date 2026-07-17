@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-rag"
+version = "0.1.0"
+description = "Private, local semantic search over your documents"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx",
+    "lancedb",
+    "msgpack",
+    "tiktoken",
+    "typer",
+    "rich",
+    "pypdf>=6.14.2",
+    "fastapi",
+    "uvicorn",
+    "jinja2",
+    "python-multipart",
+]
+
+[project.optional-dependencies]
+watch = ["watchdog>=6.0"]
+
+[project.scripts]
+local-rag = "local_rag.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
