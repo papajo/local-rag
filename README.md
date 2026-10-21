@@ -90,4 +90,4 @@ name must match `q` (not `query_text`), as the FastAPI handler uses
 | File | Contents |
 |---|---|
 | [`instructions.md`](instructions.md) | Full setup, architecture, CLI reference, score interpretation, API |
-| `mainIdea.md` | Original motivation and use cases |
+| [`docs/mainIdea.md`](docs/mainIdea.md) | Original motivation and use cases |
