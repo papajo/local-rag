@@ -91,3 +91,33 @@ name must match `q` (not `query_text`), as the FastAPI handler uses
 |---|---|
 | [`instructions.md`](instructions.md) | Full setup, architecture, CLI reference, score interpretation, API |
 | [`docs/mainIdea.md`](docs/mainIdea.md) | Original motivation and use cases |
+
+---
+
+## P1 upgrade — cited answers with a decline (Firm Knowledge Assistant)
+
+`query` searches; `ask` answers. New in this branch:
+
+```bash
+uv run local-rag ask "What documents are needed for an uncontested divorce intake?"
+uv run local-rag ask "When did someone last go to the moon?"   # declines, does not guess
+uv run local-rag eval   # 10-question test set; must exit 0
+```
+
+What it adds: hybrid retrieval (BM25 + TF-IDF cosine, reciprocal rank
+fusion, explainable rerank), cited extractive answers (verbatim passages,
+source file + chunk), a relevance gate that declines instead of guessing,
+a refusal check that declines value questions (a fee, a deadline) when
+the documents say the value is not in them, and a 10-question eval
+harness (7 answerable, 3 unanswerable by design). Eval on the bundled
+fictional sample corpus (`sample_corpus/`, Harbor & Pine Law — sample
+data only): 10/10 correct, precision @1 1.00, citation accuracy 1.00,
+decline accuracy 1.00, faithfulness 1.00. Full numbers:
+[`eval/results-2026-11-13.md`](eval/results-2026-11-13.md).
+
+Notes: the demo runs with $0 and no server (TF-IDF is a stand-in for
+the SIE embeddings so it runs anywhere). In production, swap the TF-IDF
+scorer for the existing SIE embedding search — see
+[`docs/p1-rag-upgrade.md`](docs/p1-rag-upgrade.md). The sample corpus
+stays fictional; never replace it with real firm documents in this repo.
+Demo script: [`docs/p1-demo-script.md`](docs/p1-demo-script.md).

@@ -504,6 +504,60 @@ def serve(
     uvicorn.run("local_rag.web:app", host=host, port=port, reload=reload)
 
 
+@app.command()
+def ask(
+    text: str = typer.Argument(..., help="Question to answer from the corpus"),
+    corpus: Path | None = typer.Option(
+        None, "--corpus", help="Folder of .md files (default: sample_corpus)"
+    ),
+    top_k: int = typer.Option(3, "--top-k", "-k", help="Chunks to cite from"),
+    json_out: bool = typer.Option(False, "--json", help="Machine-readable output"),
+) -> None:
+    """Answer one question with citations, or decline if the corpus has no answer.
+
+    P1 upgrade: cited, extractive answers. Default corpus is the bundled
+    sample firm corpus (sample_corpus/, fictional data only). Pass
+    --corpus to point at any other folder of Markdown files.
+    """
+    import json as _json
+
+    from local_rag.answer import answer as run_answer
+    from local_rag.config import PROJECT_ROOT
+    from local_rag.hybrid import HybridIndex, load_corpus
+
+    corpus_dir = corpus or (PROJECT_ROOT / "sample_corpus")
+    index = HybridIndex(load_corpus(corpus_dir))
+    result = run_answer(text, index, top_k=top_k)
+
+    if json_out:
+        console.print(_json.dumps({
+            "question": result.question, "status": result.status,
+            "answer": result.answer_text,
+            "citations": [{"source": c.source, "chunk": c.chunk_index,
+                           "section": c.section} for c in result.citations],
+            "top_score": round(result.top_score, 3),
+            "latency_ms": round(result.latency_ms, 1),
+        }, indent=2))
+        return
+
+    console.print(f"\n[{result.status.upper()}] (top score {result.top_score:.3f}, "
+                  f"{result.latency_ms:.0f} ms)")
+    console.print(escape(result.answer_text))
+    if result.retrieved:
+        console.print("\nRetrieved:")
+        for chunk in result.retrieved:
+            console.print(f"  - {chunk.citation()} | {chunk.section} | "
+                          f"rerank {chunk.rerank_score:.3f}")
+
+
+@app.command()
+def eval() -> None:
+    """Run the 10-question P1 evaluation. Exits 1 if any question is wrong."""
+    from local_rag.evaluate import main as run_eval_main
+
+    raise typer.Exit(code=run_eval_main())
+
+
 def main() -> None:
     app()
 
