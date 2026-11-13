@@ -25,6 +25,15 @@ CHUNK_OVERLAP_TOKENS = int(os.getenv("LOCAL_RAG_CHUNK_OVERLAP", "64"))
 VECTOR_TOP_K = int(os.getenv("LOCAL_RAG_VECTOR_TOP_K", "50"))
 FINAL_TOP_K = int(os.getenv("LOCAL_RAG_FINAL_TOP_K", "5"))
 
+# ── P1 cited answers (see src/local_rag/answer.py) ──────────────────────────
+# Relevance gate for the decline: the top reranked chunk must score at
+# least this and share at least MIN_SHARED_TERMS query terms, or the
+# system declines instead of guessing. Tuned on eval/test_set.json
+# (10 questions, 10/10 on 2026-11-13). Do not change these without
+# re-running the eval — `uv run local-rag eval` must exit 0.
+RELEVANCE_THRESHOLD = float(os.getenv("LOCAL_RAG_RELEVANCE_THRESHOLD", "0.35"))
+MIN_SHARED_TERMS = int(os.getenv("LOCAL_RAG_MIN_SHARED_TERMS", "2"))
+
 # ── Smart Spotlight (Stage 5) ─────────────────────────────────────────────────
 # Lightweight model & dimension for the always-on background indexer
 SPOTLIGHT_EMBED_DIM = int(os.getenv("LOCAL_RAG_SPOTLIGHT_DIM", "384"))
@@ -117,6 +126,8 @@ class Settings:
     chunk_overlap_tokens: int = CHUNK_OVERLAP_TOKENS
     vector_top_k: int = VECTOR_TOP_K
     final_top_k: int = FINAL_TOP_K
+    relevance_threshold: float = RELEVANCE_THRESHOLD
+    min_shared_terms: int = MIN_SHARED_TERMS
     sie_base_url: str = SIE_BASE_URL
     dedup_threshold: float = DEDUP_THRESHOLD
     code_skip_dirs: set[str] = field(default_factory=lambda: set(CODE_SKIP_DIRS))
