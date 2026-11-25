@@ -18,29 +18,37 @@ import re
 import time
 from dataclasses import dataclass, field
 
-from local_rag.hybrid import Chunk, HybridIndex, tokenize
+from local_rag.hybrid import TOKEN_RE, Chunk, HybridIndex, tokenize
 
-# Relevance gate: the top reranked chunk must score at least this, and
-# share at least two query terms with the question. Tuned on the
-# 10-question eval set — see eval/results-2026-11-13.md. Do not lower
-# it to make a single question pass; re-run the full eval instead.
+# Relevance gate. The top chunk must pass all three:
+#   - rerank score >= RELEVANCE_THRESHOLD
+#   - query-term coverage >= MIN_COVERAGE (fraction of the question's
+#     content words that appear in the chunk)
+#   - at least MIN_SHARED_TERMS query terms shared with the chunk
+# Why coverage: the rerank score of the top chunk is always >= 0.6 (its
+# fused score is normalised to 1.0), so the rerank threshold alone can
+# never decline anything. Coverage is the check that actually separates
+# on-topic from off-topic top chunks. Tuned on the 10-question eval set —
+# do not lower it to make a single question pass; re-run the full eval.
 # Defaults live here; local_rag.config overrides them when present.
 RELEVANCE_THRESHOLD = 0.35
+MIN_COVERAGE = 0.5
 MIN_SHARED_TERMS = 2
 try:
     from local_rag.config import get_settings as _get_settings
 
     _settings = _get_settings()
     RELEVANCE_THRESHOLD = _settings.relevance_threshold
+    MIN_COVERAGE = _settings.min_coverage
     MIN_SHARED_TERMS = _settings.min_shared_terms
 except Exception:
     pass
 
 DECLINE_TEXT = (
     "I can't answer that from the documents provided. "
-    "The sample firm documents do not contain that information, "
-    "so I won't guess. Please ask the firm directly, or rephrase "
-    "the question using the firm's own wording."
+    "They do not contain that information, so I won't guess. "
+    "Please ask the firm directly, or rephrase the question using "
+    "the documents' own wording."
 )
 
 SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
@@ -88,6 +96,12 @@ class Answer:
     top_score: float = 0.0
     retrieved: list[Chunk] = field(default_factory=list)
     latency_ms: float = 0.0
+    # Which route produced this answer: "rag" (hybrid BM25 + TF-IDF, the
+    # default and the fallback) or a deterministic tool from
+    # local_rag.tools ("list_files", "phrase_lookup", "section_lookup").
+    # Set by local_rag.agent.route_answer; plain answer() is always "rag".
+    path: str = "rag"
+    path_detail: str = ""
 
 
 def _shared_terms(question: str, chunk: Chunk) -> int:
@@ -105,7 +119,8 @@ def answer(question: str, index: HybridIndex, top_k: int = 3) -> Answer:
 
     top = retrieved[0]
     shared = _shared_terms(question, top)
-    if top.rerank_score < RELEVANCE_THRESHOLD or shared < MIN_SHARED_TERMS:
+    if (top.rerank_score < RELEVANCE_THRESHOLD or top.coverage < MIN_COVERAGE
+            or shared < MIN_SHARED_TERMS):
         return Answer(question, "declined", _decline_with_evidence(question, retrieved),
                       [], top.rerank_score, retrieved, latency_ms)
 
@@ -118,7 +133,10 @@ def answer(question: str, index: HybridIndex, top_k: int = 3) -> Answer:
     # mislead; declining with it as evidence is correct. A question
     # that asks *what* is refused ("What cases does the firm not take
     # on?") is not value-seeking, so it is answered, not declined.
-    refusal = _refusal_sentence(question, retrieved)
+    # Only the top chunk (the one that would be cited) is checked, so a
+    # refusal sentence in an unrelated lower-ranked chunk cannot block a
+    # good answer.
+    refusal = _refusal_sentence(question, retrieved[:1])
     if refusal is not None:
         return Answer(question, "declined",
                       DECLINE_TEXT + f" What the documents do say: \"{refusal}\"",
@@ -160,7 +178,11 @@ def _refusal_sentence(question: str, retrieved: list[Chunk]) -> str | None:
     questions, so "what do you not take on?" still gets answered.
     """
     query_terms = set(tokenize(question))
-    if not (query_terms & VALUE_TERMS):
+    # Raw tokens for the value check: "when" is a retrieval stopword, so
+    # tokenize() strips it and "When is ..." questions were never seen
+    # as value questions.
+    raw_terms = set(TOKEN_RE.findall(question.lower()))
+    if not (raw_terms & VALUE_TERMS):
         return None
     for chunk in retrieved:
         for sentence in _sentences(chunk.text):

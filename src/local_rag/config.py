@@ -33,6 +33,7 @@ FINAL_TOP_K = int(os.getenv("LOCAL_RAG_FINAL_TOP_K", "5"))
 # re-running the eval — `uv run local-rag eval` must exit 0.
 RELEVANCE_THRESHOLD = float(os.getenv("LOCAL_RAG_RELEVANCE_THRESHOLD", "0.35"))
 MIN_SHARED_TERMS = int(os.getenv("LOCAL_RAG_MIN_SHARED_TERMS", "2"))
+MIN_COVERAGE = float(os.getenv("LOCAL_RAG_MIN_COVERAGE", "0.5"))
 
 # ── Smart Spotlight (Stage 5) ─────────────────────────────────────────────────
 # Lightweight model & dimension for the always-on background indexer
@@ -128,6 +129,7 @@ class Settings:
     final_top_k: int = FINAL_TOP_K
     relevance_threshold: float = RELEVANCE_THRESHOLD
     min_shared_terms: int = MIN_SHARED_TERMS
+    min_coverage: float = MIN_COVERAGE
     sie_base_url: str = SIE_BASE_URL
     dedup_threshold: float = DEDUP_THRESHOLD
     code_skip_dirs: set[str] = field(default_factory=lambda: set(CODE_SKIP_DIRS))
@@ -146,3 +148,22 @@ def get_settings() -> Settings:
     if _settings is None:
         _settings = Settings()
     return _settings
+
+
+def find_demo_dir(name: str) -> Path:
+    """Locate a demo data folder (sample_corpus, eval) that ships in the repo.
+
+    These folders are not packaged into the wheel, so after a plain
+    `pip install` PROJECT_ROOT points into site-packages, not the repo.
+    Look in the source checkout first, then the current directory, and
+    fail with a clear message instead of silently using an empty folder.
+    """
+    for base in (PROJECT_ROOT, Path.cwd()):
+        candidate = base / name
+        if candidate.is_dir():
+            return candidate
+    raise FileNotFoundError(
+        f"'{name}/' not found. The demo data ships with the source "
+        f"checkout: run from the repo folder (uv run local-rag ...), "
+        f"or pass --corpus to point at your own folder of .md files."
+    )

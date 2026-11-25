@@ -101,7 +101,7 @@ name must match `q` (not `query_text`), as the FastAPI handler uses
 ```bash
 uv run local-rag ask "What documents are needed for an uncontested divorce intake?"
 uv run local-rag ask "When did someone last go to the moon?"   # declines, does not guess
-uv run local-rag eval   # 10-question test set; must exit 0
+uv run local-rag eval   # original 10 + extended 22 + review-queue tasks; must exit 0
 ```
 
 What it adds: hybrid retrieval (BM25 + TF-IDF cosine, reciprocal rank
@@ -111,9 +111,93 @@ a refusal check that declines value questions (a fee, a deadline) when
 the documents say the value is not in them, and a 10-question eval
 harness (7 answerable, 3 unanswerable by design). Eval on the bundled
 fictional sample corpus (`sample_corpus/`, Harbor & Pine Law — sample
-data only): 10/10 correct, precision @1 1.00, citation accuracy 1.00,
-decline accuracy 1.00, faithfulness 1.00. Full numbers:
-[`eval/results-2026-11-13.md`](eval/results-2026-11-13.md).
+data only): all 7 answerable questions answered with a citation to the
+right source, all 3 unanswerable ones declined; precision @1 1.00,
+citation accuracy 1.00. A question only counts as correct if it is
+answered *and* cites an expected source. Full numbers:
+[`eval/results-2026-11-24.md`](eval/results-2026-11-24.md).
+
+**Known limitations (read before using it on real documents):**
+
+- `ask` builds its own in-memory index from a folder of Markdown files.
+  It does not yet read the LanceDB index built by `ingest`, so PDFs and
+  other ingested documents can't be asked about yet. Wiring `ask` to the
+  existing SIE/LanceDB search is the next step (swap points in
+  [`docs/p1-rag-upgrade.md`](docs/p1-rag-upgrade.md)).
+- The eval is 10 questions on 6 fictional files. It shows the pipeline
+  works end to end; it is not a benchmark.
+- Answers are extractive (verbatim passages), so there is no
+  faithfulness score to report: the quote check is 1.0 by construction.
+- The relevance gate is keyword-based (term coverage + shared terms).
+  Very short questions that share only one word with the right passage
+  can be declined (e.g. "How much is a consultation?").
+- `sample_corpus/` and `eval/` ship with the source checkout, not the
+  installed package. Run from the repo folder, or pass `--corpus`.
+
+**Principles upgrades (branch `feat/principles-upgrades`, 2026-11-25).**
+Three ideas from Sam Bhagwat, *Principles of Building AI Agents* (3rd ed.,
+Mastra, 2026), ch. 19, 14 and 27, built stdlib-only, $0, no API key:
+
+1. **Search tools first, RAG as the fallback** (`src/local_rag/agent.py`,
+   `src/local_rag/tools.py`). `ask` now tries three deterministic tools —
+   list the documents, find an exact "quoted phrase", match a section
+   heading — and falls back to the hybrid retrieval above when none finds
+   evidence. Same rules on every route: verbatim excerpts, file + chunk
+   citations, value questions declined when the passage says the value is
+   not there. The route is shown (`path`) and is in `--json`.
+   `--rag-only` gives the old behaviour. `--previous "..."` handles a
+   one-turn follow-up ("What does it cover?").
+2. **Suspend/resume human review** (`src/local_rag/review.py`, off by
+   default). `ask --review` holds the drafted answer in a JSON queue on disk
+   (`data/review_queue.json`, or `--queue`, or `$LOCAL_RAG_REVIEW_QUEUE`)
+   instead of releasing it. Then: `local-rag review list`,
+   `review show ID`, `review approve ID [--edit "text"]`,
+   `review reject ID --note "why"`. Every command re-reads the file and
+   writes atomically, so pending items survive a restart.
+3. **Bigger eval** (`eval/test_set_extended.json`). 22 more cases:
+   answer-vs-decline, router path choice, citation + cited section,
+   follow-ups, plus 9 review-queue task checks. Most cases use
+   `sample_corpus_nonprofit/` — **Bayside Community Pantry is an invented
+   nonprofit; every file is labelled sample data and nothing in it is
+   real.**
+
+Eval on 2026-11-25 (`uv run local-rag eval`, exit 0; full numbers in
+[`eval/results-2026-11-25.md`](eval/results-2026-11-25.md)):
+
+| Part | Result |
+|---|---|
+| Original 10 (router) | 7 answered with the right citation, 3 declined — same as before (RAG-only also 7 / 3). Q1, Q2, Q3, Q6 now answered by the section tool; the rest by RAG. |
+| Extended, gated (20) | 20/20 correct: 14 answered, 6 declined, 0 false answers, 0 false declines; path choice 12/12; citation + section 14/14; follow-ups 4/4 |
+| Known limitations (2) | still failing, shown every run, not counted (see below) |
+| Review queue tasks | 9/9 |
+
+Also fixed: possessives (`pantry's`) tokenised to a stray `s` that counted
+as a shared word and let off-topic chunks pass the gate; `s`/`t` are now
+stopwords. The original 10 are unchanged by it.
+
+**Known limitations of the upgrades:**
+
+- Still true: `ask` (router included) reads Markdown folders only — it
+  does **not** read the LanceDB index built by `ingest`.
+- The router is rules, not an LLM. Section matching uses word overlap with
+  light plural stripping; two equally good headings (e.g. "How long
+  records are kept" vs "Where household records are kept") count as
+  ambiguous and go to RAG.
+- Keyword gate misses, kept visible as eval cases K1/K2: a synonym the
+  documents don't use ("homemade" vs "home-cooked") is declined even
+  though the answer is there; a question that shares a name with an
+  unrelated passage ("executive director's salary") gets that passage
+  quoted. Embeddings (the SIE swap) are the fix, not threshold tuning.
+- Follow-ups are one turn only (`--previous`), triggered by short or
+  pronoun-led questions.
+- An edited approval is the reviewer's wording, flagged `edited: true`;
+  it is no longer a verbatim quote of the cited chunks. The queue is a
+  single local JSON file for one reviewer at a time — no locking across
+  simultaneous reviewers.
+- Path, precision and recall numbers for tool routes use the hybrid
+  retrieval run alongside every question, so the Part 1 retrieval metrics
+  match the RAG-only run by construction.
+- 32 questions on 11 invented files is a regression check, not a benchmark.
 
 Notes: the demo runs with $0 and no server (TF-IDF is a stand-in for
 the SIE embeddings so it runs anywhere). In production, swap the TF-IDF

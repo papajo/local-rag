@@ -1,0 +1,252 @@
+{
+  "corpus": "sample_corpus_nonprofit/ (Bayside Community Pantry — INVENTED nonprofit, sample data only) and sample_corpus/ (Harbor & Pine Law — fictional firm, sample data only)",
+  "note": "Extended eval (Principles of Building AI Agents ch. 27 categories). Every case is checked for answer-vs-decline and, when answered, citation to an expected source; expected_path checks the router's route; expected_section checks the cited section; previous_question makes it a follow-up. known_limitation cases are real failures kept visible: reported every run, not counted toward the pass/fail exit code.",
+  "questions": [
+    {
+      "id": "N1",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "path_choice",
+      "question": "What documents do you have?",
+      "answerable": true,
+      "expected_sources": [
+        "01-volunteer-onboarding.md",
+        "02-food-distribution.md",
+        "03-donations-policy.md",
+        "04-ai-use-policy.md",
+        "05-client-privacy.md"
+      ],
+      "expected_path": "list_files"
+    },
+    {
+      "id": "N2",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "path_choice",
+      "question": "What is the minimum age for volunteers?",
+      "answerable": true,
+      "expected_sources": [
+        "01-volunteer-onboarding.md"
+      ],
+      "expected_path": "section_lookup",
+      "expected_section": "Minimum age for volunteers"
+    },
+    {
+      "id": "N3",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "citation",
+      "question": "How old do you have to be to help out?",
+      "answerable": true,
+      "expected_sources": [
+        "01-volunteer-onboarding.md"
+      ],
+      "expected_path": "rag",
+      "expected_section": "Minimum age for volunteers"
+    },
+    {
+      "id": "N4",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "path_choice",
+      "question": "Which policy mentions \"locked filing cabinet\"?",
+      "answerable": true,
+      "expected_sources": [
+        "05-client-privacy.md"
+      ],
+      "expected_path": "phrase_lookup",
+      "expected_section": "Where household records are kept"
+    },
+    {
+      "id": "N5",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "answer_vs_decline",
+      "question": "Do the documents mention \"gluten-free\"?",
+      "answerable": false,
+      "expected_sources": [],
+      "expected_path": "rag"
+    },
+    {
+      "id": "N6",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "answer_vs_decline",
+      "question": "What is the date of the next food distribution?",
+      "answerable": false,
+      "expected_sources": []
+    },
+    {
+      "id": "N7",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "answer_vs_decline",
+      "question": "Is there parking at the pantry?",
+      "answerable": false,
+      "expected_sources": []
+    },
+    {
+      "id": "N8",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "answer_vs_decline",
+      "question": "What is the pantry's annual budget?",
+      "answerable": false,
+      "expected_sources": []
+    },
+    {
+      "id": "N9",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "path_choice",
+      "question": "Who approves new AI tools?",
+      "answerable": true,
+      "expected_sources": [
+        "04-ai-use-policy.md"
+      ],
+      "expected_path": "section_lookup",
+      "expected_section": "Who approves new AI tools"
+    },
+    {
+      "id": "N10",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "citation",
+      "question": "Can staff paste client names into ChatGPT?",
+      "answerable": true,
+      "expected_sources": [
+        "04-ai-use-policy.md"
+      ],
+      "expected_path": "rag",
+      "expected_section": "What staff must never put into an AI tool"
+    },
+    {
+      "id": "N11",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "path_choice",
+      "question": "How do I get a receipt for my donation?",
+      "answerable": true,
+      "expected_sources": [
+        "03-donations-policy.md"
+      ],
+      "expected_path": "section_lookup",
+      "expected_section": "Donation receipts"
+    },
+    {
+      "id": "N12",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "path_choice",
+      "question": "How long are household records kept?",
+      "answerable": true,
+      "expected_sources": [
+        "05-client-privacy.md"
+      ],
+      "expected_path": "rag",
+      "expected_section": "How long records are kept"
+    },
+    {
+      "id": "N13",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "citation",
+      "question": "When is fresh produce accepted?",
+      "answerable": true,
+      "expected_sources": [
+        "03-donations-policy.md"
+      ],
+      "expected_section": "Food donations we accept"
+    },
+    {
+      "id": "N14",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "citation",
+      "question": "Does the pantry share names with partner food banks?",
+      "answerable": true,
+      "expected_sources": [
+        "05-client-privacy.md"
+      ],
+      "expected_section": "Sharing records with partners"
+    },
+    {
+      "id": "M1",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "multi_turn",
+      "question": "And how often can they come back?",
+      "answerable": true,
+      "expected_sources": [
+        "02-food-distribution.md"
+      ],
+      "expected_section": "How often a household can visit",
+      "previous_question": "Who can receive food from the pantry?"
+    },
+    {
+      "id": "M2",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "multi_turn",
+      "question": "And how often can they come back?",
+      "answerable": false,
+      "expected_sources": []
+    },
+    {
+      "id": "M3",
+      "corpus": "sample_corpus",
+      "category": "multi_turn",
+      "question": "What does it cover?",
+      "answerable": true,
+      "expected_sources": [
+        "03-fee-policy.md"
+      ],
+      "expected_path": "section_lookup",
+      "expected_section": "What the flat fee covers",
+      "previous_question": "What is the flat fee for an uncontested divorce?"
+    },
+    {
+      "id": "M4",
+      "corpus": "sample_corpus",
+      "category": "multi_turn",
+      "question": "Who was on it?",
+      "answerable": false,
+      "expected_sources": [],
+      "previous_question": "When did someone last go to the moon?"
+    },
+    {
+      "id": "L1",
+      "corpus": "sample_corpus",
+      "category": "path_choice",
+      "question": "What documents are needed for an uncontested divorce intake?",
+      "answerable": true,
+      "expected_sources": [
+        "01-intake-checklist.md"
+      ],
+      "expected_path": "section_lookup",
+      "expected_section": "Documents needed for an uncontested divorce intake"
+    },
+    {
+      "id": "L2",
+      "corpus": "sample_corpus",
+      "category": "path_choice",
+      "question": "List the documents",
+      "answerable": true,
+      "expected_sources": [
+        "01-intake-checklist.md",
+        "02-consultation-process.md",
+        "03-fee-policy.md",
+        "04-deadline-policy.md",
+        "05-confidentiality.md",
+        "06-what-we-do-not-do.md"
+      ],
+      "expected_path": "list_files"
+    },
+    {
+      "id": "K1",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "known_limitation",
+      "question": "Can I donate a homemade lasagna?",
+      "answerable": true,
+      "expected_sources": [
+        "03-donations-policy.md"
+      ],
+      "known_limitation": true,
+      "why": "The donations policy says home-cooked food cannot be accepted, but the keyword gate does not know 'homemade' = 'home-cooked', so it declines (false decline). Needs embeddings (the SIE swap) or synonyms."
+    },
+    {
+      "id": "K2",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "known_limitation",
+      "question": "What is the executive director's salary?",
+      "answerable": false,
+      "expected_sources": [],
+      "known_limitation": true,
+      "why": "No salary is in the documents, but 'executive director' shares two words with the AI-tools section, so the keyword gate passes and quotes an unrelated passage (false answer)."
+    }
+  ]
+}

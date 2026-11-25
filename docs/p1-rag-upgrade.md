@@ -1,16 +1,18 @@
-# P1 — Firm Knowledge Assistant: production-ready RAG upgrade for local-rag
+# P1 — Firm Knowledge Assistant: cited-answer RAG demo for local-rag
 
 **What this is:** the Sundas Khalid Project 1 build, reframed for joshi's
 service business. It upgrades his pinned repo
 [github.com/papajo/local-rag](https://github.com/papajo/local-rag) from
-"local semantic search" to a production-ready RAG demo: cited answers,
+"local semantic search" to a cited-answer RAG demo: cited answers,
 a decline when the documents do not contain the answer, hybrid retrieval,
 and a published evaluation table. The demo runs on a fictional law firm's
 sample documents — no real firm, no real client data.
 
-**Status: built and tested in the sandbox, Nov 13 2026. Eval: 10/10
-questions correct** — 7 answered, 3 correctly declined, 0 false declines,
-0 false answers. Full numbers in `eval/results-2026-11-13.md`.
+**Status: built Nov 13 2026; review fixes Nov 24 2026. Eval: 7 of 7
+answerable questions answered with citations on the right source, 3 of 3
+unanswerable questions declined** — 0 false declines, 0 false answers.
+Full numbers in `eval/results-2026-11-24.md`. See "Known limitations"
+in the README before relying on this for real documents.
 Cost to run: $0. No API key, no server, no new install.
 
 ## What the audit found in local-rag as it exists today
@@ -49,7 +51,7 @@ What it does **not** do yet (the P1 gaps):
 | Sample firm corpus: 6 fictional law-firm docs, sample-only | `sample_corpus/` |
 | CLI: `ask` and `eval` commands | `src/local_rag/cli.py` |
 | Wiring: thresholds in config, commands in CLI | `src/local_rag/config.py`, `src/local_rag/cli.py` |
-| 2–3 minute demo script | `demo-script.md` |
+| 2–3 minute demo script | `p1-demo-script.md` |
 
 Deliberately **not** in this pack: no LLM answer generation (the demo
 answers are extractive, so faithfulness is verifiable by string match),
@@ -90,7 +92,7 @@ is correct (exit 1 otherwise — it is a real gate, not a report).
 | Context recall | 0.93 |
 | Citation accuracy | 1.00 |
 | Decline accuracy | 1.00 |
-| Faithfulness (verbatim in cited chunk) | 1.00 |
+| Verbatim quote check (answered only; a sanity check, 1.00 by construction — not a faithfulness score) | 1.00 |
 | Mean latency | 0.2 ms per question (in-memory, 16 chunks) |
 
 Read the numbers honestly: precision @3 is 0.57 because the 2nd and 3rd
@@ -108,7 +110,7 @@ Ask the moon question, show the decline. Ask the specific-deadline
 question, show the decline *with the policy sentence as evidence*.
 That third one is the selling point: the system refuses to invent a
 deadline, and shows you the sentence that says why. Full script in
-`demo-script.md`.
+`p1-demo-script.md`.
 
 ## This doc in the repo
 
