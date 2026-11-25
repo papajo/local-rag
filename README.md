@@ -101,7 +101,7 @@ name must match `q` (not `query_text`), as the FastAPI handler uses
 ```bash
 uv run local-rag ask "What documents are needed for an uncontested divorce intake?"
 uv run local-rag ask "When did someone last go to the moon?"   # declines, does not guess
-uv run local-rag eval   # original 10 + extended 22 + review-queue tasks; must exit 0
+uv run local-rag eval   # original 10 + extended 26 + review-queue tasks + fix checks; must exit 0
 ```
 
 What it adds: hybrid retrieval (BM25 + TF-IDF cosine, reciprocal rank
@@ -154,22 +154,53 @@ Mastra, 2026), ch. 19, 14 and 27, built stdlib-only, $0, no API key:
    `review show ID`, `review approve ID [--edit "text"]`,
    `review reject ID --note "why"`. Every command re-reads the file and
    writes atomically, so pending items survive a restart.
-3. **Bigger eval** (`eval/test_set_extended.json`). 22 more cases:
+3. **Bigger eval** (`eval/test_set_extended.json`). 26 more cases:
    answer-vs-decline, router path choice, citation + cited section,
    follow-ups, plus 9 review-queue task checks. Most cases use
    `sample_corpus_nonprofit/` — **Bayside Community Pantry is an invented
    nonprofit; every file is labelled sample data and nothing in it is
    real.**
 
-Eval on 2026-11-25 (`uv run local-rag eval`, exit 0; full numbers in
-[`eval/results-2026-11-25.md`](eval/results-2026-11-25.md)):
+**Qodo review fixes on PR #2 (2026-11-25).** Qodo flagged 10 findings on
+this branch; 7 are fixed here:
+
+- Section matches must cover the whole question: a heading that shares two
+  words ("What the flat fee covers") no longer answers "What is the
+  deadline for the flat fee?" — the passage must contain every content word
+  of the question, otherwise it falls back to gated RAG (finding 1).
+- Apostrophes are not quote marks: "What's the client's fee?" used to be
+  read as the exact phrase "s the client" and answered from the
+  confidentiality policy. Only double quotes, or single quotes around a
+  phrase (not inside a word), count; a quoted phrase needs 2+ content
+  words (finding 8).
+- The refusal check now covers every chunk that will be cited, not only
+  the first, on both the RAG and tool routes (finding 9).
+- Document listings cite each file's title line, so the displayed title is
+  in the cited evidence (finding 3).
+- The extended eval checks source and section on the same citation
+  (finding 7).
+- A folder of empty or headings-only Markdown files is now a corpus error,
+  not a silent decline-everything (finding 4).
+- `--rag-only --previous` uses the previous question only for real
+  follow-ups (finding 5).
+
+Not changed (low practical risk, noted for later): the review queue has no
+cross-process lock (finding 2); RAG fallback runs the hybrid search twice
+(finding 6, performance only); the default review queue path for a wheel
+install points inside the package (finding 10 — use `--queue` or
+`$LOCAL_RAG_REVIEW_QUEUE` until fixed).
+
+Eval on 2026-11-25 after the Qodo fixes (`python -m local_rag.evaluate`,
+exit 0; full numbers in
+[`eval/results-2026-11-25-qodo-pr2.md`](eval/results-2026-11-25-qodo-pr2.md)):
 
 | Part | Result |
 |---|---|
-| Original 10 (router) | 7 answered with the right citation, 3 declined — same as before (RAG-only also 7 / 3). Q1, Q2, Q3, Q6 now answered by the section tool; the rest by RAG. |
-| Extended, gated (20) | 20/20 correct: 14 answered, 6 declined, 0 false answers, 0 false declines; path choice 12/12; citation + section 14/14; follow-ups 4/4 |
-| Known limitations (2) | still failing, shown every run, not counted (see below) |
+| Original 10 (router) | 7 answered with the right citation, 3 declined, 0 false answers — same as before (RAG-only also 7 / 3). Q1, Q2, Q3, Q6 answered by the section tool; the rest by RAG. |
+| Extended, gated (23) | 23/23 correct: 15 answered, 6 declined, 2 regression cases where either outcome is allowed (both answered, from allowed sources); 0 false answers, 0 false declines; path choice 13/13; citation + section on the same citation 15/15; follow-ups 4/4 |
+| Known limitations (3) | still failing, shown every run, not counted (see below) |
 | Review queue tasks | 9/9 |
+| Direct checks for the Qodo fixes | 8/8 |
 
 Also fixed: possessives (`pantry's`) tokenised to a stray `s` that counted
 as a shared word and let off-topic chunks pass the gate; `s`/`t` are now
@@ -188,6 +219,13 @@ stopwords. The original 10 are unchanged by it.
   though the answer is there; a question that shares a name with an
   unrelated passage ("executive director's salary") gets that passage
   quoted. Embeddings (the SIE swap) are the fix, not threshold tuning.
+- K3: after the finding 1 fix, "What is the deadline for the flat fee?"
+  no longer goes through the section tool, but the RAG fallback still
+  quotes "What the flat fee covers" first (then the fee schedule, which
+  does give the two payment points). The keyword gate passes on 2 of 3
+  words. A literal "the passage must mention the deadline" rule was tried
+  and dropped: it wrongly declined "How much does document review cost?"
+  (the schedule says "$200 per hour", not "cost").
 - Follow-ups are one turn only (`--previous`), triggered by short or
   pronoun-led questions.
 - An edited approval is the reviewer's wording, flagged `edited: true`;
@@ -197,7 +235,7 @@ stopwords. The original 10 are unchanged by it.
 - Path, precision and recall numbers for tool routes use the hybrid
   retrieval run alongside every question, so the Part 1 retrieval metrics
   match the RAG-only run by construction.
-- 32 questions on 11 invented files is a regression check, not a benchmark.
+- 36 questions on 11 invented files is a regression check, not a benchmark.
 
 Notes: the demo runs with $0 and no server (TF-IDF is a stand-in for
 the SIE embeddings so it runs anywhere). In production, swap the TF-IDF
