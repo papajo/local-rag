@@ -166,6 +166,14 @@ def load_corpus(corpus_dir: str | Path) -> list[Chunk]:
     chunks: list[Chunk] = []
     for path in paths:
         chunks.extend(chunk_document(path))
+    # Filenames are not content: a folder holding only empty, banner-only
+    # or headings-only .md files produces no chunks, and would otherwise
+    # decline every question as if it had searched real documents
+    # (Qodo PR #2, finding 4).
+    if not chunks:
+        raise FileNotFoundError(
+            f"No indexable text in the .md files in corpus folder: {corpus_dir} "
+            f"({len(paths)} file(s) found, all empty or headings only)")
     # Re-number chunk_index globally so citations are unambiguous.
     for i, chunk in enumerate(chunks):
         chunk.chunk_index = i

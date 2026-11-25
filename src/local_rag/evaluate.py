@@ -20,7 +20,7 @@ Metrics (all computed here, none hand-entered):
   - mean latency in milliseconds, measured per question.
 
 Since the principles upgrade (feat/principles-upgrades) `local-rag eval`
-runs three parts and exits 0 only if all pass:
+runs four parts and exits 0 only if all pass:
   1. the original 10 questions through the router (tools first, RAG
      fallback), with the RAG-only numbers printed alongside for comparison;
   2. the extended set (eval/test_set_extended.json): answer-vs-decline
@@ -28,7 +28,13 @@ runs three parts and exits 0 only if all pass:
      correctness, follow-up (multi-turn) cases. known_limitation cases are
      reported but do not gate the exit code;
   3. review-queue tasks: suspend, survive a restart (new process), approve,
-     edit-then-approve, reject, refuse a double decision.
+     edit-then-approve, reject, refuse a double decision;
+  4. direct checks for the Qodo PR #2 fixes (apostrophes, paired
+     citations, refusal in a second cited chunk, listing citations, empty
+     corpora, --rag-only follow-ups).
+Extended cases may set "answerable": null (either outcome acceptable) plus
+forbidden_paths / forbidden_sources / forbidden_sections — regression guards
+for routes or passages that must not be used.
 Categories follow Bhagwat, "Principles of Building AI Agents" ch. 27.
 
 Run:  uv run local-rag eval   (or: python -m local_rag.evaluate)
@@ -128,6 +134,18 @@ def run_eval(corpus_dir: Path | None = None, test_set: Path | None = None,
     return {"summary": summary, "rows": rows}
 
 
+def paired_section_ok(citations, expected_sources: set[str],
+                      expected_section: str | None) -> bool:
+    """True when ONE citation has both an expected source and the expected
+    section. Checking source and section on separate citations let a case
+    pass when the expected file and the expected heading came from two
+    unrelated citations (Qodo PR #2, finding 7)."""
+    if not expected_section:
+        return True
+    return any(c.source in expected_sources and c.section == expected_section
+               for c in citations)
+
+
 def run_extended(test_set: Path | None = None) -> dict:
     """The extended eval: classification, path choice, citations, follow-ups."""
     test_set = test_set or (find_demo_dir("eval") / "test_set_extended.json")
@@ -142,13 +160,22 @@ def run_extended(test_set: Path | None = None) -> dict:
                               previous_question=case.get("previous_question"))
         expected = set(case["expected_sources"])
         cited = {c.source for c in result.citations}
-        status_ok = (result.status == "answered") == case["answerable"]
-        citation_ok = (bool(expected & cited) if case["answerable"] else not cited)
+        answerable = case["answerable"]  # True, False, or None = either outcome ok
+        if answerable is None:
+            status_ok = True
+            citation_ok = bool(expected & cited) if result.status == "answered" else not cited
+        else:
+            status_ok = (result.status == "answered") == answerable
+            citation_ok = (bool(expected & cited) if answerable else not cited)
         path_ok = ("expected_path" not in case or result.path == case["expected_path"])
-        section_ok = ("expected_section" not in case
-                      or any(c.section == case["expected_section"] for c in result.citations))
+        section_ok = paired_section_ok(result.citations, expected, case.get("expected_section"))
         quotes_ok = all(" ".join(c.quote.rstrip("…").split()) in " ".join(c.chunk_text.split())
                         for c in result.citations)
+        # Regression guards: routes, files or sections that must NOT be used.
+        forbidden_ok = (result.path not in case.get("forbidden_paths", [])
+                        and not (cited & set(case.get("forbidden_sources", [])))
+                        and not any(c.section in case.get("forbidden_sections", [])
+                                    for c in result.citations))
         rows.append({
             "id": case["id"], "category": case["category"], "corpus": name,
             "question": case["question"],
@@ -156,20 +183,21 @@ def run_extended(test_set: Path | None = None) -> dict:
             "answerable": case["answerable"], "status": result.status,
             "path": result.path, "expected_path": case.get("expected_path"),
             "status_ok": status_ok, "citation_ok": citation_ok, "path_ok": path_ok,
-            "section_ok": section_ok, "quotes_ok": quotes_ok,
-            "correct": status_ok and citation_ok and path_ok and section_ok and quotes_ok,
+            "section_ok": section_ok, "quotes_ok": quotes_ok, "forbidden_ok": forbidden_ok,
+            "correct": (status_ok and citation_ok and path_ok and section_ok and quotes_ok
+                        and forbidden_ok),
             "known_limitation": case.get("known_limitation", False),
             "why": case.get("why", ""),
             "cited": sorted(cited),
             "answer": result.answer_text,
         })
     gated = [r for r in rows if not r["known_limitation"]]
-    tp = sum(1 for r in gated if r["answerable"] and r["status"] == "answered")
-    fn = sum(1 for r in gated if r["answerable"] and r["status"] == "declined")
-    tn = sum(1 for r in gated if not r["answerable"] and r["status"] == "declined")
-    fp = sum(1 for r in gated if not r["answerable"] and r["status"] == "answered")
+    tp = sum(1 for r in gated if r["answerable"] is True and r["status"] == "answered")
+    fn = sum(1 for r in gated if r["answerable"] is True and r["status"] == "declined")
+    tn = sum(1 for r in gated if r["answerable"] is False and r["status"] == "declined")
+    fp = sum(1 for r in gated if r["answerable"] is False and r["status"] == "answered")
     with_path = [r for r in gated if r["expected_path"]]
-    with_section = [r for r in gated if r["answerable"]]
+    with_section = [r for r in gated if r["answerable"] is True]
     multi = [r for r in gated if r["category"] == "multi_turn"]
     summary = {
         "n_cases": len(rows),
@@ -251,12 +279,91 @@ def run_review_tasks() -> dict:
     return {"summary": {"tasks": len(tasks), "completed": done}, "tasks": tasks}
 
 
+def run_self_checks() -> dict:
+    """Small direct checks for the Qodo PR #2 fixes that the question sets
+    cannot exercise on their own (synthetic inputs, temp folders)."""
+    import tempfile
+
+    from local_rag.agent import _answer_from_chunks, rag_only_answer
+    from local_rag.answer import Citation
+    from local_rag.hybrid import Chunk
+    from local_rag.tools import ToolHit, quoted_phrase
+
+    checks: list[dict] = []
+
+    def check(name: str, ok: bool, detail: str = "") -> None:
+        checks.append({"task": name, "ok": bool(ok), "detail": detail})
+
+    # Finding 8 — apostrophes are not quote marks; real quotes still are.
+    check("apostrophes are not read as a quoted phrase (finding 8)",
+          quoted_phrase("What's the client's fee?") is None
+          and quoted_phrase("Don't they say it's fine?") is None)
+    check("real double and single quotes still give a phrase (finding 8)",
+          quoted_phrase('Which policy mentions "locked filing cabinet"?') == "locked filing cabinet"
+          and quoted_phrase("Which policy mentions 'locked filing cabinet'?") == "locked filing cabinet")
+
+    # Finding 7 — expected source and section on different citations fails.
+    a = Citation("expected.md", 0, "Other heading", "q")
+    b = Citation("unrelated.md", 1, "Wanted heading", "q")
+    check("mismatched source/section citations fail the paired check (finding 7)",
+          not paired_section_ok([a, b], {"expected.md"}, "Wanted heading")
+          and paired_section_ok([Citation("expected.md", 0, "Wanted heading", "q")],
+                                {"expected.md"}, "Wanted heading"))
+
+    # Finding 9 — a refusal sentence in the SECOND cited chunk declines.
+    first = Chunk("Distribution schedule. Food is handed out at the pantry hall.",
+                  "x.md", "x.md", 0, "Distribution schedule")
+    second = Chunk("Distribution dates. This page does not state the date of the next "
+                   "food distribution.", "x.md", "x.md", 1, "Distribution dates")
+    res = _answer_from_chunks("What is the date of the next food distribution?",
+                              ToolHit("section_lookup", [first, second], "t"), [], 0.0)
+    check("refusal sentence in the second cited chunk declines (finding 9)",
+          res.status == "declined" and not res.citations, res.status)
+
+    # Finding 3 — every listed title is inside its cited evidence.
+    index = HybridIndex(load_corpus(find_demo_dir("sample_corpus")))
+    listing = route_answer("What documents do you have?", index)
+    check("document listing titles are inside their cited evidence (finding 3)",
+          listing.path == "list_files" and listing.citations and all(
+              c.level == "document" and c.quote in c.chunk_text
+              and f"{c.quote} [{c.label()}]" in listing.answer_text
+              for c in listing.citations))
+
+    # Finding 4 — empty / headings-only corpora are rejected.
+    rejected = []
+    for name, body in (("empty.md", ""), ("headings.md", "# Title\n\n## Section\n")):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / name).write_text(body, encoding="utf-8")
+            try:
+                load_corpus(tmp)
+                rejected.append(False)
+            except FileNotFoundError:
+                rejected.append(True)
+    check("empty and headings-only corpora raise a corpus error (finding 4)", all(rejected))
+
+    # Finding 5 — --rag-only does not inherit an old topic for a full question.
+    fresh = rag_only_answer("What should a client bring to the first consultation?", index,
+                            previous_question="What is the flat fee for an uncontested divorce?")
+    plain = rag_only_answer("What should a client bring to the first consultation?", index)
+    follow = rag_only_answer("What does it cover?", index,
+                             previous_question="What is the flat fee for an uncontested divorce?")
+    check("rag-only ignores --previous for a self-contained question (finding 5)",
+          [c.chunk_index for c in fresh.retrieved] == [c.chunk_index for c in plain.retrieved]
+          and fresh.path_detail == "")
+    check("rag-only still expands a real follow-up (finding 5)",
+          follow.path_detail.startswith("follow-up of:"))
+
+    done = sum(1 for c in checks if c["ok"])
+    return {"summary": {"checks": len(checks), "passed": done}, "checks": checks}
+
+
 def main() -> int:
-    """Run all three eval parts. Exit 0 only when every gated check passes."""
+    """Run all four eval parts. Exit 0 only when every gated check passes."""
     base = run_eval(use_router=False)
     report = run_eval(use_router=True)
     ext = run_extended()
     rev = run_review_tasks()
+    selfc = run_self_checks()
 
     summary = report["summary"]
     print("\nPart 1 — original 10 questions (router: tools first, RAG fallback)")
@@ -285,7 +392,8 @@ def main() -> int:
         else:
             mark = "OK " if row["correct"] else "FAIL"
         flags = "".join(f" {k}=N" for k in ("status_ok", "citation_ok", "path_ok",
-                                            "section_ok", "quotes_ok") if not row[k])
+                                            "section_ok", "quotes_ok", "forbidden_ok")
+                        if not row[k])
         print(f"  {mark} {row['id']} {row['category']} [{row['status']}] "
               f"path={row['path']}{flags} — {row['question']}")
 
@@ -295,9 +403,16 @@ def main() -> int:
               f"{' (' + t['detail'] + ')' if t['detail'] else ''}")
     print(f"  completed: {rev['summary']['completed']}/{rev['summary']['tasks']}")
 
+    print("\nPart 4 — direct checks for the Qodo PR #2 fixes")
+    for c in selfc["checks"]:
+        print(f"  {'OK ' if c['ok'] else 'FAIL'} {c['task']}"
+              f"{' (' + c['detail'] + ')' if c['detail'] and not c['ok'] else ''}")
+    print(f"  passed: {selfc['summary']['passed']}/{selfc['summary']['checks']}")
+
     ok = (all(r["correct"] for r in report["rows"])
           and all(r["correct"] for r in ext["rows"] if not r["known_limitation"])
-          and rev["summary"]["completed"] == rev["summary"]["tasks"])
+          and rev["summary"]["completed"] == rev["summary"]["tasks"]
+          and selfc["summary"]["passed"] == selfc["summary"]["checks"])
     print(f"\nRESULT: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
 
