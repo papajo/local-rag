@@ -7,7 +7,7 @@ data" out loud once. Do not name a real firm or client.
 
 ```bash
 cd local-rag   # repo root
-uv run local-rag eval   # must exit 0; shows the 10/10 table
+uv run local-rag eval   # must exit 0; 7 answered + 3 declined
 ```
 
 ## Take 1 — the good answer (about 60 seconds)

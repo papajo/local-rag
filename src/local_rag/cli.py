@@ -522,15 +522,21 @@ def ask(
     import json as _json
 
     from local_rag.answer import answer as run_answer
-    from local_rag.config import PROJECT_ROOT
+    from local_rag.config import find_demo_dir
     from local_rag.hybrid import HybridIndex, load_corpus
 
-    corpus_dir = corpus or (PROJECT_ROOT / "sample_corpus")
-    index = HybridIndex(load_corpus(corpus_dir))
+    try:
+        corpus_dir = corpus or find_demo_dir("sample_corpus")
+        index = HybridIndex(load_corpus(corpus_dir))
+    except FileNotFoundError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=2)
     result = run_answer(text, index, top_k=top_k)
 
     if json_out:
-        console.print(_json.dumps({
+        # Plain stdout, not the Rich console: Rich wraps long lines at
+        # terminal width, which breaks JSON when piped.
+        print(_json.dumps({
             "question": result.question, "status": result.status,
             "answer": result.answer_text,
             "citations": [{"source": c.source, "chunk": c.chunk_index,
@@ -555,7 +561,12 @@ def eval() -> None:
     """Run the 10-question P1 evaluation. Exits 1 if any question is wrong."""
     from local_rag.evaluate import main as run_eval_main
 
-    raise typer.Exit(code=run_eval_main())
+    try:
+        code = run_eval_main()
+    except FileNotFoundError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=2)
+    raise typer.Exit(code=code)
 
 
 def main() -> None:

@@ -9,12 +9,17 @@ Metrics (all computed here, none hand-entered):
   - decline accuracy: unanswerable questions correctly declined /
     all unanswerable; answerable questions wrongly declined are counted
     separately as false declines.
-  - faithfulness: fraction of answer sentences found verbatim in the
-    chunk they cite. (Extractive answers should score 1.0 — if this
-    ever drops below 1.0, the answer builder is broken, not the metric.)
+  - verbatim quote check: for answered questions only, fraction of
+    quoted excerpts found verbatim in the chunk they cite. This is a
+    sanity check on the answer builder, NOT a faithfulness score:
+    answers are cut from the cited chunk, so it is 1.0 by construction.
+    A real faithfulness metric needs generated (non-extractive) answers.
+  - correct: an answerable question counts as correct only if it was
+    answered AND cites an expected source; an unanswerable one only if
+    it was declined.
   - mean latency in milliseconds, measured per question.
 
-Run:  python -m firm_rag eval
+Run:  uv run local-rag eval   (or: python -m local_rag.evaluate)
 """
 
 from __future__ import annotations
@@ -23,15 +28,13 @@ import json
 from pathlib import Path
 
 from local_rag.answer import answer
+from local_rag.config import find_demo_dir
 from local_rag.hybrid import HybridIndex, load_corpus
-
-# Repo root: src/local_rag/evaluate.py -> parents[2].
-PACK_ROOT = Path(__file__).resolve().parents[2]
 
 
 def run_eval(corpus_dir: Path | None = None, test_set: Path | None = None) -> dict:
-    corpus_dir = corpus_dir or (PACK_ROOT / "sample_corpus")
-    test_set = test_set or (PACK_ROOT / "eval" / "test_set.json")
+    corpus_dir = corpus_dir or find_demo_dir("sample_corpus")
+    test_set = test_set or (find_demo_dir("eval") / "test_set.json")
     cases = json.loads(test_set.read_text(encoding="utf-8"))["questions"]
     index = HybridIndex(load_corpus(corpus_dir))
 
@@ -57,7 +60,9 @@ def run_eval(corpus_dir: Path | None = None, test_set: Path | None = None) -> di
             quote = cit.quote.rstrip("…")
             if quote and quote in chunk_text:
                 faithful += 1
-        faith = faithful / total_quotes if total_quotes else 1.0
+        # None for declined rows: no quotes, nothing to check, and they
+        # must not be averaged in as a perfect score.
+        faith = faithful / total_quotes if total_quotes else None
         precision_at_1 = 1.0 if top3_sources and top3_sources[0] in expected else 0.0
         if not case["answerable"]:
             precision_at_1 = 0.0
@@ -66,13 +71,13 @@ def run_eval(corpus_dir: Path | None = None, test_set: Path | None = None) -> di
             "question": case["question"],
             "answerable": case["answerable"],
             "status": result.status,
-            "correct": (result.status == "answered") if case["answerable"]
-                       else (result.status == "declined"),
+            "correct": (result.status == "answered" and citation_ok)
+                       if case["answerable"] else (result.status == "declined"),
             "context_precision_at_1": round(precision_at_1, 2),
             "context_precision_at_3": round(precision, 2),
             "context_recall": round(recall, 2),
             "citation_ok": citation_ok,
-            "faithfulness": round(faith, 2),
+            "verbatim_quote_check": round(faith, 2) if faith is not None else None,
             "top_score": round(result.top_score, 3),
             "latency_ms": round(result.latency_ms, 1),
             "answer": result.answer_text,
@@ -82,7 +87,7 @@ def run_eval(corpus_dir: Path | None = None, test_set: Path | None = None) -> di
     unanswerable = [r for r in rows if not r["answerable"]]
     summary = {
         "n_questions": len(rows),
-        "answered_correctly": sum(1 for r in answerable if r["status"] == "answered"),
+        "answered_correctly": sum(1 for r in answerable if r["correct"]),
         "false_declines": sum(1 for r in answerable if r["status"] == "declined"),
         "declined_correctly": sum(1 for r in unanswerable if r["status"] == "declined"),
         "false_answers": sum(1 for r in unanswerable if r["status"] == "answered"),
@@ -96,8 +101,9 @@ def run_eval(corpus_dir: Path | None = None, test_set: Path | None = None) -> di
             sum(1 for r in answerable if r["citation_ok"]) / max(len(answerable), 1), 2),
         "decline_accuracy": round(
             sum(1 for r in unanswerable if r["status"] == "declined") / max(len(unanswerable), 1), 2),
-        "mean_faithfulness": round(
-            sum(r["faithfulness"] for r in rows) / max(len(rows), 1), 2),
+        "verbatim_quote_check_answered": round(
+            sum(r["verbatim_quote_check"] for r in rows if r["verbatim_quote_check"] is not None)
+            / max(sum(1 for r in rows if r["verbatim_quote_check"] is not None), 1), 2),
         "mean_latency_ms": round(
             sum(r["latency_ms"] for r in rows) / max(len(rows), 1), 1),
     }

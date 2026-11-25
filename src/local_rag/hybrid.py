@@ -53,6 +53,7 @@ class Chunk:
     tfidf_score: float = 0.0
     fused_score: float = 0.0
     rerank_score: float = 0.0
+    coverage: float = 0.0  # fraction of query terms present in the chunk
 
     def citation(self) -> str:
         return f"{self.source} (chunk {self.chunk_index})"
@@ -71,8 +72,9 @@ def chunk_document(path: Path, max_chars: int = 900) -> list[Chunk]:
     was a real miss in the first eval run, fixed here.
     """
     text = path.read_text(encoding="utf-8")
-    # Drop the SAMPLE banner blockquote lines — they are not content.
-    lines = [ln for ln in text.splitlines() if not ln.strip().startswith(">")]
+    # Drop only the SAMPLE DATA banner (the blockquote at the top of each
+    # sample file). Other blockquotes are real content and are indexed.
+    lines = _strip_sample_banner(text.splitlines())
     chunks: list[Chunk] = []
     section = ""
     buf: list[str] = []
@@ -104,18 +106,61 @@ def chunk_document(path: Path, max_chars: int = 900) -> list[Chunk]:
             continue
         if not stripped:
             continue
-        if buf and buf_len + len(stripped) > max_chars:
-            flush()
-        buf.append(stripped)
-        buf_len += len(stripped) + 1
+        # A single line longer than max_chars is split at word
+        # boundaries, so no part of it is hidden past the excerpt limit.
+        for piece in _split_long(stripped, max_chars):
+            if buf and buf_len + len(piece) > max_chars:
+                flush()
+            buf.append(piece)
+            buf_len += len(piece) + 1
     flush()
     return chunks
 
 
+def _strip_sample_banner(lines: list[str]) -> list[str]:
+    """Remove the leading "> SAMPLE DATA ONLY ..." blockquote, if present."""
+    out: list[str] = []
+    in_banner = False
+    for ln in lines:
+        s = ln.strip()
+        if s.startswith(">") and ("SAMPLE DATA" in s.upper() or in_banner):
+            in_banner = True
+            continue
+        if in_banner and not s.startswith(">"):
+            in_banner = False
+        out.append(ln)
+    return out
+
+
+def _split_long(line: str, max_chars: int) -> list[str]:
+    if len(line) <= max_chars:
+        return [line]
+    pieces: list[str] = []
+    while len(line) > max_chars:
+        cut = line[:max_chars].rsplit(" ", 1)[0] or line[:max_chars]
+        pieces.append(cut)
+        line = line[len(cut):].lstrip()
+    if line:
+        pieces.append(line)
+    return pieces
+
+
 def load_corpus(corpus_dir: str | Path) -> list[Chunk]:
-    """Load every .md file in a directory, in filename order."""
+    """Load every .md file in a directory, in filename order.
+
+    Raises instead of returning nothing: a wrong path or an empty folder
+    used to load zero chunks and quietly decline every question, which
+    looked like "the documents don't say" when the real problem was
+    that no documents were loaded.
+    """
+    corpus_dir = Path(corpus_dir)
+    if not corpus_dir.is_dir():
+        raise FileNotFoundError(f"Corpus folder not found: {corpus_dir}")
+    paths = sorted(corpus_dir.glob("*.md"))
+    if not paths:
+        raise FileNotFoundError(f"No .md files in corpus folder: {corpus_dir}")
     chunks: list[Chunk] = []
-    for path in sorted(Path(corpus_dir).glob("*.md")):
+    for path in paths:
         chunks.extend(chunk_document(path))
     # Re-number chunk_index globally so citations are unambiguous.
     for i, chunk in enumerate(chunks):
@@ -218,8 +263,9 @@ class HybridIndex:
             chunk.fused_score = fused.get(i, 0.0)
             # Explainable rerank: fused score + term coverage + phrase bonus.
             # This stands in for the SIE cross-encoder in local-rag; see
-            # local-rag-integration.md for the swap.
+            # docs/p1-rag-upgrade.md for the swap.
             coverage = len(query_set & set(self.docs[i])) / max(len(query_set), 1)
+            chunk.coverage = coverage
             phrase_bonus = 0.15 if query_lower in chunk.text.lower() else 0.0
             chunk.rerank_score = (
                 0.6 * (chunk.fused_score / max_fused)
