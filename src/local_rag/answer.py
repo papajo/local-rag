@@ -96,6 +96,12 @@ class Answer:
     top_score: float = 0.0
     retrieved: list[Chunk] = field(default_factory=list)
     latency_ms: float = 0.0
+    # Which route produced this answer: "rag" (hybrid BM25 + TF-IDF, the
+    # default and the fallback) or a deterministic tool from
+    # local_rag.tools ("list_files", "phrase_lookup", "section_lookup").
+    # Set by local_rag.agent.route_answer; plain answer() is always "rag".
+    path: str = "rag"
+    path_detail: str = ""
 
 
 def _shared_terms(question: str, chunk: Chunk) -> int:

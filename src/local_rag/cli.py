@@ -512,15 +512,31 @@ def ask(
     ),
     top_k: int = typer.Option(3, "--top-k", "-k", help="Chunks to cite from"),
     json_out: bool = typer.Option(False, "--json", help="Machine-readable output"),
+    rag_only: bool = typer.Option(
+        False, "--rag-only", help="Skip the search tools; hybrid RAG only (old behaviour)"
+    ),
+    previous: str | None = typer.Option(
+        None, "--previous", help="Previous question, for a follow-up like 'What does it cover?'"
+    ),
+    review: bool = typer.Option(
+        False, "--review",
+        help="Suspend the drafted answer in the review queue instead of releasing it",
+    ),
+    queue: Path | None = typer.Option(
+        None, "--queue", help="Review queue file (default: data/review_queue.json)"
+    ),
 ) -> None:
     """Answer one question with citations, or decline if the corpus has no answer.
 
-    P1 upgrade: cited, extractive answers. Default corpus is the bundled
-    sample firm corpus (sample_corpus/, fictional data only). Pass
-    --corpus to point at any other folder of Markdown files.
+    Search tools first (file list, exact quoted phrase, section heading),
+    hybrid RAG as the fallback; the route taken is shown. Default corpus
+    is the bundled sample firm corpus (sample_corpus/, fictional data
+    only). Pass --corpus to point at any other folder of Markdown files.
+    With --review the answer is held for a human (see `local-rag review`).
     """
     import json as _json
 
+    from local_rag.agent import route_answer
     from local_rag.answer import answer as run_answer
     from local_rag.config import find_demo_dir
     from local_rag.hybrid import HybridIndex, load_corpus
@@ -531,7 +547,28 @@ def ask(
     except FileNotFoundError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=2)
-    result = run_answer(text, index, top_k=top_k)
+    if rag_only:
+        query = text if not previous else f"{previous} {text}"
+        result = run_answer(query, index, top_k=top_k)
+        result.question = text
+    else:
+        result = route_answer(text, index, top_k=top_k, previous_question=previous)
+
+    if review:
+        from local_rag.review import ReviewQueue
+
+        rq = ReviewQueue(queue)
+        item_id = rq.suspend(result)
+        if json_out:
+            print(_json.dumps({"question": result.question, "review_id": item_id,
+                               "state": "pending", "queue": str(rq.path)}, indent=2))
+        else:
+            console.print(escape(f"\n[SUSPENDED FOR REVIEW] id {item_id} "
+                                 f"(draft {result.status}, path {result.path})"))
+            console.print(f"Queue: {escape(str(rq.path))}")
+            console.print(f"Approve: local-rag review approve {item_id}   "
+                          f"Reject: local-rag review reject {item_id}")
+        return
 
     if json_out:
         # Plain stdout, not the Rich console: Rich wraps long lines at
@@ -539,6 +576,7 @@ def ask(
         print(_json.dumps({
             "question": result.question, "status": result.status,
             "answer": result.answer_text,
+            "path": result.path, "path_detail": result.path_detail,
             "citations": [{"source": c.source, "chunk": c.chunk_index,
                            "section": c.section} for c in result.citations],
             "top_score": round(result.top_score, 3),
@@ -546,19 +584,100 @@ def ask(
         }, indent=2))
         return
 
-    console.print(f"\n[{result.status.upper()}] (top score {result.top_score:.3f}, "
-                  f"{result.latency_ms:.0f} ms)")
+    console.print(f"\n[{result.status.upper()}] (path {result.path}"
+                  f"{' — ' + escape(result.path_detail) if result.path_detail else ''}, "
+                  f"top score {result.top_score:.3f}, {result.latency_ms:.0f} ms)")
     console.print(escape(result.answer_text))
     if result.retrieved:
-        console.print("\nRetrieved:")
+        console.print("\nRetrieved (hybrid):")
         for chunk in result.retrieved:
             console.print(f"  - {chunk.citation()} | {chunk.section} | "
                           f"rerank {chunk.rerank_score:.3f}")
 
 
+# ── Review queue (suspend/resume) ─────────────────────────────────────────────
+
+review_app = typer.Typer(help="Human review of suspended answers (ask --review).")
+app.add_typer(review_app, name="review")
+
+_QUEUE_OPT = typer.Option(None, "--queue", help="Review queue file")
+
+
+def _rq(queue: Path | None):
+    from local_rag.review import ReviewQueue
+
+    return ReviewQueue(queue)
+
+
+@review_app.command("list")
+def review_list(
+    queue: Path | None = _QUEUE_OPT,
+    all_items: bool = typer.Option(False, "--all", help="Include decided items"),
+) -> None:
+    """List pending (or all) suspended answers."""
+    rq = _rq(queue)
+    items = rq.all() if all_items else rq.pending()
+    if not items:
+        console.print("No items." if all_items else "Nothing pending.")
+        return
+    for item in items:
+        console.print(f"{item['id']}  " + escape(f"[{item['state']}]") + f"  draft {item['draft']['status']} "
+                      f"via {item['draft']['path']}  — {escape(item['question'])}")
+
+
+@review_app.command("show")
+def review_show(item_id: str, queue: Path | None = _QUEUE_OPT) -> None:
+    """Show one item: question, draft, citations, decision."""
+    import json as _json
+
+    from local_rag.review import ReviewError
+
+    try:
+        print(_json.dumps(_rq(queue).get(item_id), indent=2, ensure_ascii=False))
+    except ReviewError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+
+@review_app.command("approve")
+def review_approve(
+    item_id: str,
+    edit: str | None = typer.Option(None, "--edit", help="Release this text instead of the draft"),
+    note: str = typer.Option("", "--note", help="Reviewer note"),
+    queue: Path | None = _QUEUE_OPT,
+) -> None:
+    """Approve (optionally edit) and release a suspended answer."""
+    from local_rag.review import ReviewError
+
+    try:
+        item = _rq(queue).approve(item_id, edited_text=edit, note=note)
+    except ReviewError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1)
+    console.print(escape(f"[APPROVED{' — EDITED' if item['edited'] else ''}] {item_id}"))
+    console.print(escape(item["final_answer"]))
+
+
+@review_app.command("reject")
+def review_reject(
+    item_id: str,
+    note: str = typer.Option("", "--note", help="Why it was rejected"),
+    queue: Path | None = _QUEUE_OPT,
+) -> None:
+    """Reject a suspended answer; it is never released."""
+    from local_rag.review import ReviewError
+
+    try:
+        _rq(queue).reject(item_id, note=note)
+    except ReviewError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1)
+    console.print(escape(f"[REJECTED] {item_id}"))
+
+
 @app.command()
 def eval() -> None:
-    """Run the 10-question P1 evaluation. Exits 1 if any question is wrong."""
+    """Run the original 10-question eval plus the extended eval. Exits 1 on any failure."""
     from local_rag.evaluate import main as run_eval_main
 
     try:

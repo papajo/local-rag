@@ -32,6 +32,10 @@ STOPWORDS = {
     "as", "if", "so", "not", "no", "me", "am", "an", "have", "has",
     "had", "will", "just", "about", "into", "than", "then", "but",
     "all", "any", "each", "which", "please", "tell", "give", "know",
+    # Possessive / contraction fragments: "pantry's" tokenises to
+    # "pantry" + "s", and a stray "s" then counted as a shared term with
+    # any chunk containing "household's" — enough to pass the gate.
+    "s", "t",
 }
 
 TOKEN_RE = re.compile(r"[a-z0-9]+")
