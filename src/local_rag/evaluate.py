@@ -20,7 +20,7 @@ Metrics (all computed here, none hand-entered):
   - mean latency in milliseconds, measured per question.
 
 Since the principles upgrade (feat/principles-upgrades) `local-rag eval`
-runs four parts and exits 0 only if all pass:
+runs five parts and exits 0 only if all pass:
   1. the original 10 questions through the router (tools first, RAG
      fallback), with the RAG-only numbers printed alongside for comparison;
   2. the extended set (eval/test_set_extended.json): answer-vs-decline
@@ -31,7 +31,10 @@ runs four parts and exits 0 only if all pass:
      edit-then-approve, reject, refuse a double decision;
   4. direct checks for the Qodo PR #2 fixes (apostrophes, paired
      citations, refusal in a second cited chunk, listing citations, empty
-     corpora, --rag-only follow-ups).
+     corpora, --rag-only follow-ups);
+  5. the plain-English behaviour specs in features/*.feature (Gherkin,
+     run by local_rag.specs), plus a check that every eval case id has a
+     spec. @known-failure scenarios are reported but do not gate.
 Extended cases may set "answerable": null (either outcome acceptable) plus
 forbidden_paths / forbidden_sources / forbidden_sections — regression guards
 for routes or passages that must not be used.
@@ -358,12 +361,14 @@ def run_self_checks() -> dict:
 
 
 def main() -> int:
-    """Run all four eval parts. Exit 0 only when every gated check passes."""
+    """Run all five eval parts. Exit 0 only when every gated check passes."""
     base = run_eval(use_router=False)
     report = run_eval(use_router=True)
     ext = run_extended()
     rev = run_review_tasks()
     selfc = run_self_checks()
+    from local_rag.specs import print_report, run_specs
+    specs = run_specs()
 
     summary = report["summary"]
     print("\nPart 1 — original 10 questions (router: tools first, RAG fallback)")
@@ -409,10 +414,14 @@ def main() -> int:
               f"{' (' + c['detail'] + ')' if c['detail'] and not c['ok'] else ''}")
     print(f"  passed: {selfc['summary']['passed']}/{selfc['summary']['checks']}")
 
+    print("\nPart 5 — plain-English behaviour specs (features/*.feature)")
+    print_report(specs)
+
     ok = (all(r["correct"] for r in report["rows"])
           and all(r["correct"] for r in ext["rows"] if not r["known_limitation"])
           and rev["summary"]["completed"] == rev["summary"]["tasks"]
-          and selfc["summary"]["passed"] == selfc["summary"]["checks"])
+          and selfc["summary"]["passed"] == selfc["summary"]["checks"]
+          and specs["summary"]["all_gated_pass"])
     print(f"\nRESULT: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
 

@@ -101,7 +101,7 @@ name must match `q` (not `query_text`), as the FastAPI handler uses
 ```bash
 uv run local-rag ask "What documents are needed for an uncontested divorce intake?"
 uv run local-rag ask "When did someone last go to the moon?"   # declines, does not guess
-uv run local-rag eval   # original 10 + extended 26 + review-queue tasks + fix checks; must exit 0
+uv run local-rag eval   # original 10 + extended 26 + review-queue tasks + fix checks + behaviour specs; must exit 0
 ```
 
 What it adds: hybrid retrieval (BM25 + TF-IDF cosine, reciprocal rank
@@ -236,6 +236,30 @@ stopwords. The original 10 are unchanged by it.
   retrieval run alongside every question, so the Part 1 retrieval metrics
   match the RAG-only run by construction.
 - 36 questions on 11 invented files is a regression check, not a benchmark.
+
+### Behaviour specs and backlog
+
+What `ask` must do is written in plain English in
+[`features/`](features/) (Gherkin), for example:
+
+```gherkin
+Scenario: N8 The annual budget (apostrophe must not fool it)
+  Given the documents in "sample_corpus_nonprofit"
+  When I ask "What is the pantry's annual budget?"
+  Then it declines
+  And it cites nothing
+```
+
+35 scenarios cover all 36 eval cases (answers, declines, follow-ups,
+regressions, and the 3 known failures tagged `@known-failure`). They run
+as Part 5 of `local-rag eval`, or alone with `python -m local_rag.specs`.
+The runner is stdlib only, and an unknown step is an error, never
+skipped. A run fails if any eval case id has no matching scenario.
+
+[`BACKLOG.md`](BACKLOG.md) keeps two lists: the product backlog (what
+local-rag should do better, including K1 to K3) and the Kaizen backlog
+(what the build-and-check process should do better). Rule: a new bug
+gets a failing scenario first.
 
 Notes: the demo runs with $0 and no server (TF-IDF is a stand-in for
 the SIE embeddings so it runs anywhere). In production, swap the TF-IDF
