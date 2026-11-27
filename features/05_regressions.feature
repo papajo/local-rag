@@ -33,3 +33,43 @@ Feature: Bugs that were fixed stay fixed
     And it cites "05-client-privacy.md"
     And the cited section is "Where household records are kept"
     And the answer comes from the "phrase_lookup" route
+
+  @R4
+  Scenario: R4 A decline quotes the passage it came from, not the first chunk
+    # Qodo PR #3, finding 1. The refusal sentence lives in the deadline
+    # policy's chunk 10. The old code re-found it by text and fell back
+    # to the first chunk when the sentence had extra spaces. No bundled
+    # document has those extra spaces, so this scenario pins the
+    # behaviour on the real files; the double-space case itself is
+    # covered by the synthetic checks in eval Part 4.
+    Given the documents in "sample_corpus"
+    When I ask "Which policy mentions \"does not state the deadline\"?"
+    Then it declines
+    And the decline names "04-deadline-policy.md"
+    And the answer comes from the "phrase_lookup" route
+
+  @R5
+  Scenario: R5 A document listing cites titles, not chunks
+    # Qodo PR #3, finding 2. The JSON and review-queue form of a listing
+    # citation used to point at a section chunk. The title line is not
+    # inside any chunk, so the structured form must say document-level
+    # with no chunk and no section.
+    Given the documents in "sample_corpus"
+    When I ask "List the documents"
+    Then it answers
+    And it cites all of "01-intake-checklist.md", "02-consultation-process.md", "03-fee-policy.md", "04-deadline-policy.md", "05-confidentiality.md", "06-what-we-do-not-do.md"
+    And the listing citations are document-level
+    And the answer comes from the "list_files" route
+
+  @R6
+  Scenario: R6 A listing's evidence is a line from its own file
+    # Qodo PR #3, finding 3. The old code rebuilt the evidence line as
+    # "# <title>", which is not a line of the file when the heading has
+    # odd spacing. No bundled heading has odd spacing, so this pins the
+    # behaviour on the real files; the odd-spacing case is covered by
+    # the synthetic check in eval Part 4.
+    Given the documents in "sample_corpus"
+    When I ask "List the documents"
+    Then it answers
+    And each listing citation's evidence is a line from its own file
+    And the answer comes from the "list_files" route

@@ -432,8 +432,17 @@ def main() -> int:
     ext = run_extended()
     rev = run_review_tasks()
     selfc = run_self_checks()
-    from local_rag.specs import print_report, run_specs
-    specs = run_specs()
+    from local_rag.specs import SpecError, print_report, run_specs
+    try:
+        specs = run_specs()
+    except SpecError as e:
+        # One bad spec file used to crash the whole eval with a traceback
+        # and no results at all (Qodo PR #5, finding 5). Report it as
+        # Part 5 failing, with a distinct exit code, instead.
+        print("\nPart 5 — plain-English behaviour specs (features/*.feature)")
+        print(f"  SPEC ERROR: {e}")
+        print("\nRESULT: FAIL (specs could not run)")
+        return 2
 
     summary = report["summary"]
     print("\nPart 1 — original 10 questions (router: tools first, RAG fallback)")

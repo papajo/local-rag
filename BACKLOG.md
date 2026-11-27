@@ -49,6 +49,10 @@ Status: `open` · `doing` · `done (date)` · `dropped (why)`
 | Z4 | `docs/p1-rag-upgrade.md` and `docs/p1-demo-script.md` predate the router, review queue and specs | Update them; add "docs touched?" to the PR checklist | open |
 | Z5 | Test cases live in two places (`eval/*.json` and `features/`) | Parity check (done) keeps ids aligned. Next: generate one from the other, or make `features/` the single source | open |
 | Z6 | K1 to K3 can't move until the TF-IDF stand-in is swapped for embeddings | One decision: when to do the SIE swap. Then re-run and untag whatever passes | open (decision) |
+| Z7 | A scenario with no "Then" checks still passes (Qodo PR #5, finding 2) | Require at least one assertion step per scenario in `specs.py`; a scenario that only asks a question must fail | open |
+| Z8 | An "it cites" check on a declined answer passes whatever file it names (Qodo PR #5, finding 3) | On a decline, a cites step must fail — a decline cites nothing, so the step to use is "it cites nothing" | open |
+| Z9 | Spec coverage counts tags only, so a tag on the wrong scenario still counts as covering that eval case (Qodo PR #5, finding 4) | Check the scenario actually asks the tagged case's question, or generate the specs from the eval ids | open |
+| Z10 | One bad spec file crashed the whole eval with a traceback and no results (Qodo PR #5, finding 5) | Guard `run_specs()` in `evaluate.py`: report the spec error as Part 5 failing and exit 2 | done (2026-11-27, local only, unpushed) |
 
 ## Done log
 
@@ -65,3 +69,15 @@ Status: `open` · `doing` · `done (date)` · `dropped (why)`
   added first for each (eval Part 4, 15 checks), then fixed. Z2/Z3 would
   have caught these before merge only if Qodo's review was required;
   still open.
+- 2026-11-27 Qodo review of PR #5 (5 findings, all about the specs):
+  finding 1 (the 3 PR #3 fixes had no plain-English spec) partly fixed the
+  same day, local only, unpushed: new steps "the decline names", "the
+  listing citations are document-level", "each listing citation's evidence
+  is a line from its own file", with scenarios R4/R5/R6 in `features/05`.
+  Honest limit found while writing them: only R5 fails on the old code.
+  R4 and R6 pin the behaviour on the real files, but no bundled document
+  triggers the old bugs (no double-spaced refusal sentence, no oddly
+  spaced heading), so those two cases stay covered by the synthetic
+  checks in eval Part 4. Finding 5 fixed the same day: a bad spec file
+  now reports as Part 5 failing with exit 2 instead of crashing the eval.
+  Findings 2–4 logged as Z7–Z9, not fixed yet.

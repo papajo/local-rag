@@ -25,6 +25,11 @@ Supported steps (one per line, Given/When/Then/And/But all work):
   Then it does not use the "<route>" route
   Then it does not cite "<file>"
   Then it does not quote the section "<heading>"
+  Then the decline names "<file>"        (the decline text cites that file)
+  Then the listing citations are document-level
+                                          (every citation is a title, with no
+                                          chunk or section in its JSON form)
+  Then each listing citation's evidence is a line from its own file
 Every scenario also checks, without a step, that each quote is word-for-
 word inside the passage it cites.
 
@@ -202,6 +207,54 @@ def run_scenario(sc: Scenario) -> tuple[bool, list[str]]:
         elif re.fullmatch(r'it does not quote the section ""', shape):
             if any(c.section == args[0] for c in need_result(step).citations):
                 failures.append(f"quoted the forbidden section '{args[0]}'")
+        elif re.fullmatch(r'the decline names ""', shape):
+            # The citation lives in the decline text, not in citations:
+            # a decline returns no structured citations, it quotes the
+            # refusal sentence and names the chunk it came from.
+            r = need_result(step)
+            if r.status != "declined":
+                failures.append("expected a decline, got an answer")
+            elif f"[{args[0]} (chunk " not in r.answer_text:
+                failures.append(f"decline does not name {args[0]}: "
+                                f"...{r.answer_text[-80:]}")
+        elif step == "the listing citations are document-level":
+            r = need_result(step)
+            if not r.citations:
+                failures.append("expected listing citations, got none")
+            for c in r.citations:
+                if c.level != "document":
+                    failures.append(f"citation {c.source} is {c.level}-level, "
+                                    f"not document-level")
+                    continue
+                to_dict = getattr(c, "to_dict", None)
+                if to_dict is None:
+                    failures.append(f"citation {c.source} has no structured "
+                                    f"(JSON) form")
+                    continue
+                d = to_dict()
+                if d.get("chunk") is not None or d.get("section") is not None:
+                    failures.append(f"listing citation {c.source} still points "
+                                    f"at a chunk/section: {d}")
+                if not str(d.get("label", "")).endswith("(document title)"):
+                    failures.append(f"listing citation {c.source} label is "
+                                    f"{d.get('label')!r}")
+                if not str(d.get("evidence", "")).startswith("#"):
+                    failures.append(f"listing citation {c.source} evidence is "
+                                    f"not the title line: {d.get('evidence')!r}")
+        elif step == "each listing citation's evidence is a line from its own file":
+            r = need_result(step)
+            if not r.citations:
+                failures.append("expected listing citations, got none")
+            for c in r.citations:
+                try:
+                    lines = (find_demo_dir(corpus) / c.source).read_text(
+                        encoding="utf-8").splitlines()
+                except OSError:
+                    failures.append(f"cannot read {c.source}")
+                    continue
+                if c.chunk_text not in lines:
+                    failures.append(f"evidence for {c.source} is not a line of "
+                                    f"that file: {c.chunk_text!r}")
         else:
             raise SpecError(f"{sc.file}:{sc.line}: unknown step: {step}")
     if result is None:
