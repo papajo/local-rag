@@ -7,7 +7,8 @@ stays stdlib-only, $0 and needs no API key. Order:
 
   1. list_files      — "What documents do you have?"
   2. phrase_lookup   — the question quotes an exact phrase
-  3. section_lookup  — the question matches one heading closely
+  3. section_lookup  — the question matches one heading closely AND the
+                       passage contains every content word of the question
   4. rag             — existing hybrid BM25 + TF-IDF + relevance gate
 
 Whichever route answers, the rules from local_rag.answer still hold:
@@ -29,8 +30,8 @@ from local_rag.answer import (
 )
 from local_rag.hybrid import TOKEN_RE, Chunk, HybridIndex, tokenize
 from local_rag.tools import (
-    ToolHit, file_title, is_list_request, list_files, phrase_lookup,
-    quoted_phrase, section_lookup,
+    ToolHit, covers_question, file_title, is_list_request, list_files,
+    phrase_lookup, quoted_phrase, section_lookup,
 )
 
 ANAPHORA = {"it", "that", "this", "they", "those", "them", "there", "its"}
@@ -57,18 +58,22 @@ def _top(retrieved: list[Chunk]) -> float:
 def _answer_from_chunks(question: str, hit: ToolHit, retrieved: list[Chunk],
                         started: float) -> Answer:
     latency = (time.monotonic() - started) * 1000
-    chunks = hit.chunks
-    refusal = _refusal_sentence(question, chunks[:1])
-    if refusal is not None:
-        return Answer(question, "declined",
-                      DECLINE_TEXT + f" What the documents do say: \"{refusal}\" "
-                      f"[{chunks[0].citation()}]",
-                      [], _top(retrieved), retrieved, latency, hit.tool, hit.detail)
     picked: list[Chunk] = []
-    for chunk in chunks:
+    for chunk in hit.chunks:
         picked.append(chunk)
         if len(" ".join(_excerpt(c.text) for c in picked)) >= 500 or len(picked) == 2:
             break
+    # Check every chunk that will be quoted, not just the first: a
+    # "does not state the date" sentence in the second cited chunk must
+    # not end up inside an "answered" result (Qodo PR #2, finding 9).
+    refusal = _refusal_sentence(question, picked)
+    if refusal is not None:
+        source = next((c for c in picked if refusal in " ".join(c.text.split())),
+                      picked[0])
+        return Answer(question, "declined",
+                      DECLINE_TEXT + f" What the documents do say: \"{refusal}\" "
+                      f"[{source.citation()}]",
+                      [], _top(retrieved), retrieved, latency, hit.tool, hit.detail)
     citations = [Citation(c.source, c.chunk_index, c.section, _excerpt(c.text), c.text)
                  for c in picked]
     text = " ".join(f"{cit.quote} [{cit.label()}]" for cit in citations)
@@ -78,18 +83,53 @@ def _answer_from_chunks(question: str, hit: ToolHit, retrieved: list[Chunk],
 
 def _answer_file_list(question: str, hit: ToolHit, retrieved: list[Chunk],
                       started: float) -> Answer:
+    """List the documents, each cited at document level by its own title.
+
+    The displayed title is the file's H1 line, which is usually not inside
+    any chunk (chunks start at section headings). So the citation points
+    at the document title itself — quote = the title, evidence = the H1
+    line read from the file — instead of a chunk that does not contain the
+    displayed text (Qodo PR #2, finding 3).
+    """
     citations = []
     lines = []
     for chunk in hit.chunks:
-        # Quote the first section heading: it is verbatim in the chunk
-        # text, so the citation check still holds.
-        quote = chunk.section or _excerpt(chunk.text, 80)
-        citations.append(Citation(chunk.source, chunk.chunk_index, chunk.section,
-                                  quote, chunk.text))
-        lines.append(f"{file_title(chunk)} [{chunk.citation()}]")
+        title, evidence = file_title_line(chunk)
+        cit = Citation(chunk.source, chunk.chunk_index, chunk.section, title, evidence,
+                       level="document")
+        citations.append(cit)
+        lines.append(f"{title} [{cit.label()}]")
     text = "The documents I can answer from: " + "; ".join(lines) + "."
     return Answer(question, "answered", text, citations, _top(retrieved), retrieved,
                   (time.monotonic() - started) * 1000, hit.tool, hit.detail)
+
+
+def file_title_line(chunk: Chunk) -> tuple[str, str]:
+    """(displayed title, verbatim evidence line) for a chunk's file.
+
+    Evidence is the H1 line exactly as written in the file. With no H1,
+    the file name is both the title and the evidence.
+    """
+    title = file_title(chunk)
+    if title == chunk.source:
+        return title, chunk.source
+    return title, f"# {title}"
+
+
+def rag_only_answer(question: str, index: HybridIndex, top_k: int = 3,
+                    previous_question: str | None = None) -> Answer:
+    """Hybrid RAG only (no tools), with the same follow-up rule as the router.
+
+    The previous question is used only when the current one is a
+    follow-up; a complete new question is searched on its own words
+    (Qodo PR #2, finding 5 — it used to inherit the old topic).
+    """
+    query = expand_follow_up(question, previous_question)
+    result = answer(query, index, top_k=top_k)
+    result.question = question
+    if query != question:
+        result.path_detail = f"follow-up of: {previous_question}"
+    return result
 
 
 def route_answer(question: str, index: HybridIndex, top_k: int = 3,
@@ -119,11 +159,23 @@ def route_answer(question: str, index: HybridIndex, top_k: int = 3,
             return finish(_answer_from_chunks(query, hit, retrieved, started))
 
     hit = section_lookup(query, index.chunks)
+    section_note = ""
     if hit.chunks:
-        return finish(_answer_from_chunks(query, hit, retrieved, started))
+        # A heading match alone is not enough: the passage must contain
+        # every content word of the question, otherwise the question is
+        # asking for something the section does not address (Qodo PR #2,
+        # finding 1: "deadline for the flat fee" matched the heading
+        # "What the flat fee covers"). Fall back to the gated RAG path.
+        if covers_question(query, hit.chunks[0]):
+            return finish(_answer_from_chunks(query, hit, retrieved, started))
+        section_note = f"section match rejected (passage lacks question words): {hit.detail}"
 
     result = answer(query, index, top_k=top_k)
     result.path = "rag"
+    notes = []
     if phrase:
-        result.path_detail = f"quoted phrase not found: {phrase}"
+        notes.append(f"quoted phrase not found: {phrase}")
+    if section_note:
+        notes.append(section_note)
+    result.path_detail = "; ".join(notes)
     return finish(result)

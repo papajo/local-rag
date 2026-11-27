@@ -81,9 +81,14 @@ class Citation:
     chunk_index: int
     section: str
     quote: str
-    chunk_text: str = ""  # full text of the cited chunk (faithfulness check)
+    chunk_text: str = ""  # full text of the cited evidence (faithfulness check)
+    # "chunk" (a passage) or "document" (the file's title line — used by
+    # document listings, whose displayed title is not inside any chunk).
+    level: str = "chunk"
 
     def label(self) -> str:
+        if self.level == "document":
+            return f"{self.source} (document title)"
         return f"{self.source} (chunk {self.chunk_index})"
 
 
@@ -124,24 +129,6 @@ def answer(question: str, index: HybridIndex, top_k: int = 3) -> Answer:
         return Answer(question, "declined", _decline_with_evidence(question, retrieved),
                       [], top.rerank_score, retrieved, latency_ms)
 
-    # Refusal check: if the question asks for a *value* (a fee, a
-    # deadline, a date) and the best passage says the documents do not
-    # contain that value, decline instead of quoting general text as
-    # if it were the answer. Example: a specific-case deadline question
-    # retrieves the policy sentence "It does not state the deadline for
-    # any specific client's case" — quoting that as an answer would
-    # mislead; declining with it as evidence is correct. A question
-    # that asks *what* is refused ("What cases does the firm not take
-    # on?") is not value-seeking, so it is answered, not declined.
-    # Only the top chunk (the one that would be cited) is checked, so a
-    # refusal sentence in an unrelated lower-ranked chunk cannot block a
-    # good answer.
-    refusal = _refusal_sentence(question, retrieved[:1])
-    if refusal is not None:
-        return Answer(question, "declined",
-                      DECLINE_TEXT + f" What the documents do say: \"{refusal}\"",
-                      [], top.rerank_score, retrieved, latency_ms)
-
     # Extractive answer: verbatim excerpts from the top chunks, in
     # rerank order. The top chunk's excerpt first; a second chunk only
     # if the first is short. No sentence cherry-picking across chunks —
@@ -153,6 +140,26 @@ def answer(question: str, index: HybridIndex, top_k: int = 3) -> Answer:
         if len(" ".join(p[0] for p in picked)) >= 500:
             break
     picked = picked[:2]
+
+    # Refusal check: if the question asks for a *value* (a fee, a
+    # deadline, a date) and a passage that would be cited says the
+    # documents do not contain that value, decline instead of quoting
+    # general text as if it were the answer. Example: a specific-case
+    # deadline question retrieves the policy sentence "It does not state
+    # the deadline for any specific client's case" — quoting that as an
+    # answer would mislead; declining with it as evidence is correct. A
+    # question that asks *what* is refused ("What cases does the firm
+    # not take on?") is not value-seeking, so it is answered, not
+    # declined. Every chunk that will be cited is checked (Qodo PR #2,
+    # finding 9 — checking only the first let a refusal sentence in the
+    # second cited chunk be quoted inside an "answered" result); chunks
+    # that are retrieved but never cited are ignored, so an unrelated
+    # lower-ranked chunk still cannot block a good answer.
+    refusal = _refusal_sentence(question, [chunk for _, chunk in picked])
+    if refusal is not None:
+        return Answer(question, "declined",
+                      DECLINE_TEXT + f" What the documents do say: \"{refusal}\"",
+                      [], top.rerank_score, retrieved, latency_ms)
 
     citations = [
         Citation(chunk.source, chunk.chunk_index, chunk.section, excerpt, chunk.text)

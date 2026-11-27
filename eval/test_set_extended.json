@@ -1,6 +1,6 @@
 {
   "corpus": "sample_corpus_nonprofit/ (Bayside Community Pantry — INVENTED nonprofit, sample data only) and sample_corpus/ (Harbor & Pine Law — fictional firm, sample data only)",
-  "note": "Extended eval (Principles of Building AI Agents ch. 27 categories). Every case is checked for answer-vs-decline and, when answered, citation to an expected source; expected_path checks the router's route; expected_section checks the cited section; previous_question makes it a follow-up. known_limitation cases are real failures kept visible: reported every run, not counted toward the pass/fail exit code.",
+  "note": "Extended eval (Principles of Building AI Agents ch. 27 categories). Every case is checked for answer-vs-decline and, when answered, citation to an expected source; expected_path checks the router's route; expected_section checks the cited section; previous_question makes it a follow-up. known_limitation cases are real failures kept visible: reported every run, not counted toward the pass/fail exit code. Regression cases (R*) guard the Qodo PR #2 fixes; \"answerable\": null means either outcome is acceptable as long as the forbidden route/source/section is not used.",
   "questions": [
     {
       "id": "N1",
@@ -227,6 +227,52 @@
       "expected_path": "list_files"
     },
     {
+      "id": "R1",
+      "corpus": "sample_corpus",
+      "category": "regression",
+      "question": "What is the deadline for the flat fee?",
+      "answerable": null,
+      "expected_sources": [
+        "03-fee-policy.md"
+      ],
+      "forbidden_paths": [
+        "section_lookup",
+        "phrase_lookup"
+      ],
+      "why": "Qodo PR #2 finding 1: the heading 'What the flat fee covers' shares two words with the question but states no deadline; the section route must not answer from it."
+    },
+    {
+      "id": "R2",
+      "corpus": "sample_corpus",
+      "category": "regression",
+      "question": "What's the client's fee?",
+      "answerable": null,
+      "expected_sources": [
+        "03-fee-policy.md",
+        "02-consultation-process.md"
+      ],
+      "forbidden_paths": [
+        "phrase_lookup"
+      ],
+      "forbidden_sources": [
+        "05-confidentiality.md"
+      ],
+      "why": "Qodo PR #2 finding 8: two apostrophes were read as quotes around \"s the client\" and answered from the confidentiality policy."
+    },
+    {
+      "id": "R3",
+      "corpus": "sample_corpus_nonprofit",
+      "category": "regression",
+      "question": "Which policy mentions 'locked filing cabinet'?",
+      "answerable": true,
+      "expected_sources": [
+        "05-client-privacy.md"
+      ],
+      "expected_path": "phrase_lookup",
+      "expected_section": "Where household records are kept",
+      "why": "Real single quotes around a phrase must still use the exact-phrase tool after the finding 8 fix."
+    },
+    {
       "id": "K1",
       "corpus": "sample_corpus_nonprofit",
       "category": "known_limitation",
@@ -247,6 +293,21 @@
       "expected_sources": [],
       "known_limitation": true,
       "why": "No salary is in the documents, but 'executive director' shares two words with the AI-tools section, so the keyword gate passes and quotes an unrelated passage (false answer)."
+    },
+    {
+      "id": "K3",
+      "corpus": "sample_corpus",
+      "category": "known_limitation",
+      "question": "What is the deadline for the flat fee?",
+      "answerable": null,
+      "expected_sources": [
+        "03-fee-policy.md"
+      ],
+      "forbidden_sections": [
+        "What the flat fee covers"
+      ],
+      "known_limitation": true,
+      "why": "After the finding 1 fix the section route no longer answers, but the RAG fallback still quotes 'What the flat fee covers' first: the keyword gate passes on 2 of 3 words (flat, fee). Needs a stronger relevance signal (embeddings) to fix without breaking fee questions phrased as 'cost'."
     }
   ]
 }

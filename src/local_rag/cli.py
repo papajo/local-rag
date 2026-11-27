@@ -536,8 +536,7 @@ def ask(
     """
     import json as _json
 
-    from local_rag.agent import route_answer
-    from local_rag.answer import answer as run_answer
+    from local_rag.agent import rag_only_answer, route_answer
     from local_rag.config import find_demo_dir
     from local_rag.hybrid import HybridIndex, load_corpus
 
@@ -548,9 +547,7 @@ def ask(
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=2)
     if rag_only:
-        query = text if not previous else f"{previous} {text}"
-        result = run_answer(query, index, top_k=top_k)
-        result.question = text
+        result = rag_only_answer(text, index, top_k=top_k, previous_question=previous)
     else:
         result = route_answer(text, index, top_k=top_k, previous_question=previous)
 

@@ -24,7 +24,20 @@ from pathlib import Path
 
 from local_rag.hybrid import TOKEN_RE, Chunk, tokenize
 
-QUOTED_RE = re.compile(r"[\"“”']([^\"“”']{3,})[\"“”']")
+# Exact-phrase quotes. Double quotes (straight or curly) always count.
+# Single quotes count only as a real pair around a phrase: the opening
+# quote must follow the start of the text, a space or "(", and the
+# closing one must be followed by a non-letter. An apostrophe inside a
+# word ("What's the client's fee?") is not a quote — reading it as one
+# turned "s the client" into a fake exact phrase (Qodo PR #2, finding 8).
+DOUBLE_QUOTED_RE = re.compile(r"[\"“]([^\"“”]{3,})[\"”]")
+SINGLE_QUOTED_RE = re.compile(r"(?:^|(?<=[\s(]))['‘]([^'‘’]{3,}?)['’](?=[^\w]|$)")
+# Kept for backward compatibility with anything importing the old name.
+QUOTED_RE = DOUBLE_QUOTED_RE
+
+# A quoted phrase must carry at least this many content words to be used
+# as exact-phrase evidence on its own; shorter fragments fall back to RAG.
+PHRASE_MIN_CONTENT_TERMS = 2
 
 # A question is a file-listing request when it asks *which documents
 # exist*, not what a document says. Matched on the raw lowercase text.
@@ -84,8 +97,38 @@ def file_title(chunk: Chunk) -> str:
 
 
 def quoted_phrase(question: str) -> str | None:
-    m = QUOTED_RE.search(question)
-    return m.group(1).strip() if m else None
+    """The phrase the question quotes, or None.
+
+    Only a real quoted phrase counts (see DOUBLE_QUOTED_RE /
+    SINGLE_QUOTED_RE), and it must carry at least
+    PHRASE_MIN_CONTENT_TERMS content words: a one-word fragment is not
+    specific enough to answer from on its own.
+    """
+    m = DOUBLE_QUOTED_RE.search(question) or SINGLE_QUOTED_RE.search(question)
+    if not m:
+        return None
+    phrase = m.group(1).strip()
+    if len(tokenize(phrase)) < PHRASE_MIN_CONTENT_TERMS:
+        return None
+    return phrase
+
+
+# Light verbs that carry no topic of their own ("How do I *get* a
+# receipt?"). The retrieval tokenizer keeps them, so the coverage check
+# ignores them; everything else in the question must be in the passage.
+GENERIC_VERBS = {"get", "got", "make", "take", "find", "know", "tell", "want"}
+
+
+def covers_question(question: str, chunk: Chunk) -> bool:
+    """True when every content word of the question appears in the chunk.
+
+    Used to gate section_lookup hits: a heading can share two words with
+    the question ("deadline for the flat fee" vs "What the flat fee
+    covers") while the passage never addresses what was asked. Light
+    stemming, same as heading matching. Qodo PR #2, finding 1.
+    """
+    q = _stems(question) - GENERIC_VERBS
+    return bool(q) and q <= _stems(chunk.text)
 
 
 def phrase_lookup(phrase: str, chunks: list[Chunk]) -> ToolHit:
@@ -134,5 +177,5 @@ def section_lookup(question: str, chunks: list[Chunk]) -> ToolHit:
 
 __all__ = [
     "TOKEN_RE", "ToolHit", "is_list_request", "list_files", "file_title",
-    "quoted_phrase", "phrase_lookup", "section_lookup",
+    "quoted_phrase", "phrase_lookup", "section_lookup", "covers_question",
 ]
