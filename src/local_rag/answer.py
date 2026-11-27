@@ -91,6 +91,19 @@ class Citation:
             return f"{self.source} (document title)"
         return f"{self.source} (chunk {self.chunk_index})"
 
+    def to_dict(self) -> dict:
+        """Structured form for JSON output and the review queue.
+
+        A document-level citation (a listing's title) has no chunk: the
+        title line is not inside any chunk, so chunk and section are None
+        and the evidence is the H1 line itself (Qodo PR #3, finding 2).
+        """
+        if self.level == "document":
+            return {"source": self.source, "level": "document", "chunk": None,
+                    "section": None, "label": self.label(), "evidence": self.chunk_text}
+        return {"source": self.source, "level": "chunk", "chunk": self.chunk_index,
+                "section": self.section, "label": self.label()}
+
 
 @dataclass
 class Answer:
@@ -184,6 +197,19 @@ def _refusal_sentence(question: str, retrieved: list[Chunk]) -> str | None:
     Returns the sentence, or None. Only fires for value-seeking
     questions, so "what do you not take on?" still gets answered.
     """
+    hit = _refusal_hit(question, retrieved)
+    return hit[0] if hit else None
+
+
+def _refusal_hit(question: str, retrieved: list[Chunk]) -> tuple[str, Chunk] | None:
+    """(refusal sentence, the chunk it came from), or None.
+
+    The chunk is returned with the sentence so a decline cites the chunk
+    the sentence was really found in — re-finding it by text failed when
+    the sentence had repeated spaces, and the first chunk was cited
+    instead (Qodo PR #3, finding 1). Whitespace inside a sentence is
+    collapsed, as in excerpts, so "does  not" still reads as a refusal.
+    """
     query_terms = set(tokenize(question))
     # Raw tokens for the value check: "when" is a retrieval stopword, so
     # tokenize() strips it and "When is ..." questions were never seen
@@ -192,12 +218,13 @@ def _refusal_sentence(question: str, retrieved: list[Chunk]) -> str | None:
     if not (raw_terms & VALUE_TERMS):
         return None
     for chunk in retrieved:
-        for sentence in _sentences(chunk.text):
+        for raw in _sentences(chunk.text):
+            sentence = " ".join(raw.split())
             lowered = sentence.lower()
             if not any(p in lowered for p in REFUSAL_PHRASES):
                 continue
             if len(query_terms & set(tokenize(sentence))) >= MIN_SHARED_TERMS:
-                return sentence
+                return sentence, chunk
     return None
 
 

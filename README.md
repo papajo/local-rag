@@ -206,6 +206,27 @@ Also fixed: possessives (`pantry's`) tokenised to a stray `s` that counted
 as a shared word and let off-topic chunks pass the gate; `s`/`t` are now
 stopwords. The original 10 are unchanged by it.
 
+**Qodo review fixes on PR #3 (2026-11-27).** Qodo's review of PR #3 found
+3 more issues, all fixed, each with a direct check added first (Part 4 of
+the eval, now 15/15):
+
+- A decline now cites the chunk its "does not ..." sentence really came
+  from. Before, a sentence with repeated spaces in the second chunk was
+  cited to the first chunk. Same root cause: "does  not" (two spaces) was
+  not seen as a refusal at all; whitespace is now collapsed first.
+- `ask --json` and the review queue now say which kind of citation each
+  one is: every citation has `level` and `label`; a document listing's
+  citation is `level: "document"` with `chunk` and `section` set to
+  `null` and `evidence` = the file's title line. Before, it pointed at
+  the file's first section chunk, which does not contain the title.
+  Chunk citations keep `chunk` and `section` as before. Anyone parsing
+  the JSON should allow `chunk: null`.
+- A listing's evidence is the H1 line read from the file, not rebuilt
+  from the title, so the "title is inside its evidence" check can fail.
+
+The original 10, the extended eval, the review queue tasks and the specs
+give the same results as before these fixes.
+
 **Known limitations of the upgrades:**
 
 - Still true: `ask` (router included) reads Markdown folders only — it

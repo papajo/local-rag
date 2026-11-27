@@ -57,3 +57,11 @@ Status: `open` · `doing` · `done (date)` · `dropped (why)`
   Part 5 in `local-rag eval`. Checked that the runner catches a wrong
   route, a missing spec, an unknown step, a router that always declines,
   and altered quotes.
+- 2026-11-27 Qodo review of PR #3 (3 findings), fixed on top of Z1: a
+  decline cites the chunk its refusal sentence came from (also: extra
+  spaces inside "does not" no longer hide a refusal); JSON and review-queue
+  citations carry `level`/`label`, and listing citations have no chunk
+  pointer; listing evidence is the real H1 line. A failing check was
+  added first for each (eval Part 4, 15 checks), then fixed. Z2/Z3 would
+  have caught these before merge only if Qodo's review was required;
+  still open.
