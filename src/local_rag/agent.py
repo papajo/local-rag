@@ -26,12 +26,12 @@ from __future__ import annotations
 import time
 
 from local_rag.answer import (
-    DECLINE_TEXT, Answer, Citation, _excerpt, _refusal_sentence, answer,
+    DECLINE_TEXT, Answer, Citation, _excerpt, _refusal_hit, answer,
 )
 from local_rag.hybrid import TOKEN_RE, Chunk, HybridIndex, tokenize
 from local_rag.tools import (
-    ToolHit, covers_question, file_title, is_list_request, list_files,
-    phrase_lookup, quoted_phrase, section_lookup,
+    ToolHit, covers_question, file_title, file_title_and_line, is_list_request,
+    list_files, phrase_lookup, quoted_phrase, section_lookup,
 )
 
 ANAPHORA = {"it", "that", "this", "they", "those", "them", "there", "its"}
@@ -66,10 +66,9 @@ def _answer_from_chunks(question: str, hit: ToolHit, retrieved: list[Chunk],
     # Check every chunk that will be quoted, not just the first: a
     # "does not state the date" sentence in the second cited chunk must
     # not end up inside an "answered" result (Qodo PR #2, finding 9).
-    refusal = _refusal_sentence(question, picked)
-    if refusal is not None:
-        source = next((c for c in picked if refusal in " ".join(c.text.split())),
-                      picked[0])
+    refusal_hit = _refusal_hit(question, picked)
+    if refusal_hit is not None:
+        refusal, source = refusal_hit  # the chunk the sentence came from (Qodo PR #3, finding 1)
         return Answer(question, "declined",
                       DECLINE_TEXT + f" What the documents do say: \"{refusal}\" "
                       f"[{source.citation()}]",
@@ -107,13 +106,11 @@ def _answer_file_list(question: str, hit: ToolHit, retrieved: list[Chunk],
 def file_title_line(chunk: Chunk) -> tuple[str, str]:
     """(displayed title, verbatim evidence line) for a chunk's file.
 
-    Evidence is the H1 line exactly as written in the file. With no H1,
-    the file name is both the title and the evidence.
+    Evidence is the H1 line exactly as read from the file, not rebuilt
+    from the title, so the "title inside evidence" check can really fail
+    (Qodo PR #3, finding 3). With no H1, the file name is both.
     """
-    title = file_title(chunk)
-    if title == chunk.source:
-        return title, chunk.source
-    return title, f"# {title}"
+    return file_title_and_line(chunk)
 
 
 def rag_only_answer(question: str, index: HybridIndex, top_k: int = 3,

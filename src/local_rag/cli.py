@@ -574,8 +574,7 @@ def ask(
             "question": result.question, "status": result.status,
             "answer": result.answer_text,
             "path": result.path, "path_detail": result.path_detail,
-            "citations": [{"source": c.source, "chunk": c.chunk_index,
-                           "section": c.section} for c in result.citations],
+            "citations": [c.to_dict() for c in result.citations],
             "top_score": round(result.top_score, 3),
             "latency_ms": round(result.latency_ms, 1),
         }, indent=2))

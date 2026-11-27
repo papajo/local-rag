@@ -87,13 +87,22 @@ def list_files(chunks: list[Chunk]) -> ToolHit:
 
 def file_title(chunk: Chunk) -> str:
     """The H1 title of the chunk's file, read from disk (falls back to name)."""
+    return file_title_and_line(chunk)[0]
+
+
+def file_title_and_line(chunk: Chunk) -> tuple[str, str]:
+    """(H1 title, the raw H1 line as written in the file).
+
+    Falls back to (file name, file name) when there is no H1 or the file
+    cannot be read.
+    """
     try:
         for line in Path(chunk.file_path).read_text(encoding="utf-8").splitlines():
             if line.startswith("# "):
-                return line[2:].strip()
+                return line[2:].strip(), line
     except OSError:
         pass
-    return chunk.source
+    return chunk.source, chunk.source
 
 
 def quoted_phrase(question: str) -> str | None:
@@ -177,5 +186,6 @@ def section_lookup(question: str, chunks: list[Chunk]) -> ToolHit:
 
 __all__ = [
     "TOKEN_RE", "ToolHit", "is_list_request", "list_files", "file_title",
+    "file_title_and_line",
     "quoted_phrase", "phrase_lookup", "section_lookup", "covers_question",
 ]

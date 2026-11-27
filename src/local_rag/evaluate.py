@@ -20,7 +20,7 @@ Metrics (all computed here, none hand-entered):
   - mean latency in milliseconds, measured per question.
 
 Since the principles upgrade (feat/principles-upgrades) `local-rag eval`
-runs four parts and exits 0 only if all pass:
+runs five parts and exits 0 only if all pass:
   1. the original 10 questions through the router (tools first, RAG
      fallback), with the RAG-only numbers printed alongside for comparison;
   2. the extended set (eval/test_set_extended.json): answer-vs-decline
@@ -31,7 +31,10 @@ runs four parts and exits 0 only if all pass:
      edit-then-approve, reject, refuse a double decision;
   4. direct checks for the Qodo PR #2 fixes (apostrophes, paired
      citations, refusal in a second cited chunk, listing citations, empty
-     corpora, --rag-only follow-ups).
+     corpora, --rag-only follow-ups);
+  5. the plain-English behaviour specs in features/*.feature (Gherkin,
+     run by local_rag.specs), plus a check that every eval case id has a
+     spec. @known-failure scenarios are reported but do not gate.
 Extended cases may set "answerable": null (either outcome acceptable) plus
 forbidden_paths / forbidden_sources / forbidden_sections — regression guards
 for routes or passages that must not be used.
@@ -353,17 +356,93 @@ def run_self_checks() -> dict:
     check("rag-only still expands a real follow-up (finding 5)",
           follow.path_detail.startswith("follow-up of:"))
 
+    # ── Qodo PR #3 findings (review of 2026-11-25) ─────────────────────────
+    # PR3-1 — a refusal sentence with repeated whitespace in the SECOND
+    # picked chunk must be cited to that chunk, not to the first one.
+    spaced = Chunk("Distribution dates. This page  does not state the date of the next "
+                   "food distribution.", "x.md", "x.md", 1, "Distribution dates")
+    res = _answer_from_chunks("What is the date of the next food distribution?",
+                              ToolHit("section_lookup", [first, spaced], "t"), [], 0.0)
+    check("refusal with repeated whitespace cites its own chunk (Qodo PR #3, finding 1)",
+          res.status == "declined" and res.answer_text.endswith("[x.md (chunk 1)]"),
+          res.answer_text[-40:])
+    # Same root cause: "does  not" (two spaces) must still read as a refusal.
+    gap = Chunk("Distribution dates. This page does  not state the date of the next "
+                "food distribution.", "x.md", "x.md", 1, "Distribution dates")
+    res = _answer_from_chunks("What is the date of the next food distribution?",
+                              ToolHit("section_lookup", [first, gap], "t"), [], 0.0)
+    check("a refusal phrase split by extra spaces still declines (Qodo PR #3, finding 1)",
+          res.status == "declined" and res.answer_text.endswith("[x.md (chunk 1)]"),
+          res.status)
+
+    # PR3-2 — JSON and review-queue citations for a document listing say
+    # they are document-level, and do not point at a section chunk.
+    def _listing_dicts_ok(dicts: list[dict]) -> bool:
+        return bool(dicts) and all(
+            d.get("level") == "document" and d.get("chunk") is None
+            and d.get("section") is None and d.get("label", "").endswith("(document title)")
+            and d.get("evidence", "").startswith("#")
+            for d in dicts)
+    try:
+        json_ok = _listing_dicts_ok([c.to_dict() for c in listing.citations])
+    except AttributeError:
+        json_ok = False
+    check("JSON listing citations are document-level, no chunk pointer (Qodo PR #3, finding 2)",
+          json_ok)
+    from local_rag.review import ReviewQueue
+    with tempfile.TemporaryDirectory() as tmp:
+        rq = ReviewQueue(Path(tmp) / "q.json")
+        draft = rq.get(rq.suspend(listing))["draft"]["citations"]
+        rag_draft = rq.get(rq.suspend(route_answer(
+            "What should a client bring to the first consultation?", index)))["draft"]["citations"]
+    check("review-queue listing citations are document-level (Qodo PR #3, finding 2)",
+          _listing_dicts_ok(draft))
+    check("chunk citations still serialise with chunk and section (Qodo PR #3, finding 2)",
+          bool(rag_draft) and all(d.get("level") == "chunk" and isinstance(d.get("chunk"), int)
+                                  and d.get("section") for d in rag_draft))
+
+    # PR3-3 — listing evidence is the H1 line read from the file, so the
+    # "title inside evidence" check can actually fail.
+    from local_rag.agent import file_title_line
+    with tempfile.TemporaryDirectory() as tmp:
+        p = Path(tmp) / "t.md"
+        raw_h1 = "#   Spaced   Title  "
+        p.write_text(raw_h1 + "\n\n## A\nText here.\n", encoding="utf-8")
+        title, evidence = file_title_line(Chunk("A. Text here.", "t.md", str(p), 0, "A"))
+    check("listing evidence is the H1 line exactly as in the file (Qodo PR #3, finding 3)",
+          title == "Spaced   Title" and evidence == raw_h1, repr(evidence))
+    check("every listing evidence line is a real line of its file (Qodo PR #3, finding 3)",
+          all(c.chunk_text in Path(ch.file_path).read_text(encoding="utf-8").splitlines()
+              for c, ch in zip(listing.citations, listing_hit_chunks(index))))
+
     done = sum(1 for c in checks if c["ok"])
     return {"summary": {"checks": len(checks), "passed": done}, "checks": checks}
 
 
+def listing_hit_chunks(index: HybridIndex) -> list:
+    """The representative chunk per file, in the order the listing uses."""
+    from local_rag.tools import list_files
+    return list_files(index.chunks).chunks
+
+
 def main() -> int:
-    """Run all four eval parts. Exit 0 only when every gated check passes."""
+    """Run all five eval parts. Exit 0 only when every gated check passes."""
     base = run_eval(use_router=False)
     report = run_eval(use_router=True)
     ext = run_extended()
     rev = run_review_tasks()
     selfc = run_self_checks()
+    from local_rag.specs import SpecError, print_report, run_specs
+    try:
+        specs = run_specs()
+    except SpecError as e:
+        # One bad spec file used to crash the whole eval with a traceback
+        # and no results at all (Qodo PR #5, finding 5). Report it as
+        # Part 5 failing, with a distinct exit code, instead.
+        print("\nPart 5 — plain-English behaviour specs (features/*.feature)")
+        print(f"  SPEC ERROR: {e}")
+        print("\nRESULT: FAIL (specs could not run)")
+        return 2
 
     summary = report["summary"]
     print("\nPart 1 — original 10 questions (router: tools first, RAG fallback)")
@@ -403,16 +482,20 @@ def main() -> int:
               f"{' (' + t['detail'] + ')' if t['detail'] else ''}")
     print(f"  completed: {rev['summary']['completed']}/{rev['summary']['tasks']}")
 
-    print("\nPart 4 — direct checks for the Qodo PR #2 fixes")
+    print("\nPart 4 — direct checks for the Qodo PR #2 and PR #3 fixes")
     for c in selfc["checks"]:
         print(f"  {'OK ' if c['ok'] else 'FAIL'} {c['task']}"
               f"{' (' + c['detail'] + ')' if c['detail'] and not c['ok'] else ''}")
     print(f"  passed: {selfc['summary']['passed']}/{selfc['summary']['checks']}")
 
+    print("\nPart 5 — plain-English behaviour specs (features/*.feature)")
+    print_report(specs)
+
     ok = (all(r["correct"] for r in report["rows"])
           and all(r["correct"] for r in ext["rows"] if not r["known_limitation"])
           and rev["summary"]["completed"] == rev["summary"]["tasks"]
-          and selfc["summary"]["passed"] == selfc["summary"]["checks"])
+          and selfc["summary"]["passed"] == selfc["summary"]["checks"]
+          and specs["summary"]["all_gated_pass"])
     print(f"\nRESULT: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
 

@@ -12,9 +12,12 @@ uv run local-rag ingest [PATH]          # incremental, hash-tracked ingest
 uv run local-rag ingest-repo <repo>     # code-aware ingest
 uv run local-rag query "question"
 uv run local-rag status
+uv run local-rag eval                   # all checks incl. features/*.feature; must exit 0
+python -m local_rag.specs               # behaviour specs only
 ```
 
 ## Conventions
 - Nothing leaves the machine: no hosted APIs for embeddings or generation.
 - Ingest is idempotent (SHA-256 file hashes in SQLite); keep it that way.
+- New bug or wish: add a scenario to `features/` first (tag `@known-failure` if not fixing now) and an item to `BACKLOG.md`.
 - Full reference: `instructions.md`; motivation: `docs/mainIdea.md`; working notes: `docs/notes/`.
